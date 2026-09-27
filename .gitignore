@@ -1,0 +1,7 @@
+.DS_Store
+.derivedData/
+build/
+PersonalHealthTracker.xcodeproj/
+Config/Local.xcconfig
+*.xcuserstate
+xcuserdata/

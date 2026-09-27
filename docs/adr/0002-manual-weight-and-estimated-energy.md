@@ -1,0 +1,11 @@
+# ADR 0002: App-entered weight and explicit energy estimates
+
+Status: manual weight implemented locally and in sync; energy gap estimation specified but not yet implemented.
+
+Weight entries made in this app are the only authoritative weight records for the personal trend. They are stored on-device first, then upserted to the existing owner-only `health_samples` table with `type = app_weight`, `unit = kg`, and `source = Health Tracker (manual)`. The app no longer requests or uploads HealthKit `bodyMass`. Previously uploaded HealthKit `bodyMass` rows are not deleted, but analysis must exclude them from the weight trend. Entries can be backdated; no Apple Health write access is requested.
+
+Apple Watch non-wear is not proof of sleep or rest. The app should backfill **derived energy estimates only when recorded energy is absent**, never create synthetic HealthKit samples or relabel estimates as measured values. The user reports roughly seven hours of sleep per day and mostly seated computer/office work in other unrecorded periods. Use a user-specified usual sleep window, with actual HealthKit sleep intervals taking precedence where recorded. For a truly uncovered interval, use the current app-entered weight and the 2024 Adult Compendium reference of 1.0 MET for sleep and 1.3 MET for seated computer work (1 MET is approximately 1 kcal/kg/hour). Treat the sleep classification for an unrecorded night as assumed, not measured. Recompute estimates when late HealthKit samples or corrected weight entries arrive; do not double-count measured energy. Keep measured and estimated energy separately identifiable in UI, storage, and Codex analysis.
+
+No estimate should be generated if there is no app-entered weight, if HealthKit access/data availability cannot be established, or if the missing interval's activity class is unknown. The exact usual sleep window and the scope of historical backfill are unresolved user inputs. Estimates are for personal trend context, not clinical or nutritional precision.
+
+Sources: [Apple HealthKit basal energy](https://developer.apple.com/documentation/healthkit/hkquantitytypeidentifier/basalenergyburned), [2024 Adult Compendium MET definition](https://pacompendium.com/), [sleep MET](https://pacompendium.com/inactivity/), [seated computer work MET](https://pacompendium.com/occupation/).

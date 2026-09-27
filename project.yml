@@ -1,0 +1,44 @@
+name: PersonalHealthTracker
+options:
+  bundleIdPrefix: com.personal
+  deploymentTarget:
+    iOS: "17.0"
+packages:
+  Supabase:
+    url: https://github.com/supabase/supabase-swift
+    exactVersion: 2.55.2
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+targets:
+  PersonalHealthTracker:
+    type: application
+    platform: iOS
+    sources: [HealthTracker]
+    configFiles:
+      Debug: Config/Local.xcconfig
+      Release: Config/Local.xcconfig
+    dependencies:
+      - package: Supabase
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.personal.healthtracker.ursehfspdrzpuytymbrn
+        DEVELOPMENT_TEAM: 6V96D8SG74
+        TARGETED_DEVICE_FAMILY: "1"
+        CODE_SIGN_ENTITLEMENTS: HealthTracker/HealthTracker.entitlements
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+    info:
+      path: HealthTracker/Info.plist
+      properties:
+        CFBundleDisplayName: Health Tracker
+        UILaunchScreen: {}
+        UIRequiredDeviceCapabilities: [healthkit]
+        NSHealthShareUsageDescription: "Show your health activity and trends in your private tracker."
+        NSCameraUsageDescription: "Take a photo of a meal to save in your private log."
+        SupabaseURL: $(SUPABASE_URL)
+        SupabasePublishableKey: $(SUPABASE_PUBLISHABLE_KEY)
+        UIBackgroundModes: [fetch]
+        BGTaskSchedulerPermittedIdentifiers:
+          - com.personal.healthtracker.ursehfspdrzpuytymbrn.refresh
+        CFBundleURLTypes:
+          - CFBundleURLSchemes: [healthtracker]
