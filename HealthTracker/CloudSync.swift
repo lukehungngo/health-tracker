@@ -275,15 +275,18 @@ final class CloudSync: ObservableObject {
             .eq("user_id", value: userID.uuidString)
             .execute()
             .value
-        for meal in remote where !meals.meals.contains(where: { $0.id == meal.id }) {
+        for meal in remote {
             var imageData: Data?
-            if let path = meal.image_path {
+            if let path = meal.image_path, !path.isEmpty {
                 guard path.hasPrefix("\(userID.uuidString)/") else {
                     throw SyncError.invalidMealPath
                 }
-                imageData = try await client.storage.from("meal-images").download(path: path)
+                if meals.needsRemoteImage(id: meal.id, path: path) {
+                    imageData = try await client.storage.from("meal-images").download(path: path)
+                }
             }
-            try meals.importRemote(id: meal.id, eatenAt: meal.eaten_at, note: meal.note, imageData: imageData)
+            try meals.importRemote(id: meal.id, eatenAt: meal.eaten_at, note: meal.note,
+                                   imageData: imageData, imagePath: meal.image_path)
         }
         let remoteIDs = Set(remote.map(\.id))
         for meal in meals.meals where !remoteIDs.contains(meal.id) {

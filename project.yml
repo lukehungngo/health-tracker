@@ -42,3 +42,12 @@ targets:
           - com.personal.healthtracker.ursehfspdrzpuytymbrn.refresh
         CFBundleURLTypes:
           - CFBundleURLSchemes: [healthtracker]
+  PersonalHealthTrackerTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources: [Tests/MealSyncTests.swift]
+    dependencies:
+      - target: PersonalHealthTracker
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
