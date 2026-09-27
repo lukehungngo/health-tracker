@@ -34,6 +34,21 @@ final class AuthStore: ObservableObject {
         }
     }
 
+    func sendSignInLink(email: String) async {
+        isBusy = true
+        defer { isBusy = false }
+        do {
+            try await client.auth.signInWithOTP(
+                email: email.trimmingCharacters(in: .whitespacesAndNewlines),
+                redirectTo: URL(string: "healthtracker://auth-callback")!,
+                shouldCreateUser: false
+            )
+            message = "Sign-in link sent. Open the newest email link on this Simulator or iPhone."
+        } catch {
+            message = "Could not send sign-in link: \(error.localizedDescription)"
+        }
+    }
+
     func signUp(email: String, password: String) async {
         isBusy = true
         defer { isBusy = false }
@@ -61,9 +76,9 @@ final class AuthStore: ObservableObject {
             let session = try await client.auth.session(from: url)
             userID = session.user.id
             email = session.user.email
-            message = "Email confirmed and signed in."
+            message = "Signed in from the email link."
         } catch {
-            message = "Email confirmed. Please sign in from Settings."
+            message = "The email link could not sign in: \(error.localizedDescription)"
         }
     }
 

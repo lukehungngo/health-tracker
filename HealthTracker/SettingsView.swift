@@ -61,6 +61,10 @@ struct SettingsView: View {
                         .textContentType(.password)
                     Button("Sign In") { Task { await signIn() } }
                         .disabled(auth.isBusy || email.isEmpty || password.isEmpty)
+                    Button("Send sign-in link") {
+                        Task { await auth.sendSignInLink(email: email) }
+                    }
+                    .disabled(auth.isBusy || email.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                     Button("Create Account") { Task { await signUp() } }
                         .disabled(auth.isBusy || email.isEmpty || password.isEmpty)
                 }
