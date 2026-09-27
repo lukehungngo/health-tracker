@@ -59,6 +59,15 @@ final class EnergyStore: ObservableObject {
         entries.first { $0.kind == kind }
     }
 
+    func effective(for kind: EnergyKind, on date: Date,
+                   now: Date = .now, calendar: Calendar = .current) -> EnergyEntry? {
+        let start = calendar.startOfDay(for: date)
+        guard let nextDay = calendar.date(byAdding: .day, value: 1, to: start) else { return nil }
+        let cutoff = min(nextDay, now)
+        guard cutoff > start else { return nil }
+        return entries.first { $0.kind == kind && $0.recordedAt < cutoff }
+    }
+
     var pendingEntries: [EnergyEntry] { entries.filter(\.pendingUpload) }
 
     func save(kind: EnergyKind, kilocalories: Double, recordedAt: Date) throws {

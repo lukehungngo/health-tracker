@@ -76,6 +76,7 @@ final class BackgroundSync {
         await services.sync.run(userID: userID, meals: services.meals, weights: services.weights,
                                 leanMass: services.leanMass, energy: services.energy,
                                 profile: services.profile, mealEstimates: services.mealEstimates)
+        await services.proteinTargets.sync(userID: userID)
         await services.health.refresh()
     }
 }

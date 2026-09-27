@@ -12,6 +12,8 @@ final class AppServices {
     let profile = ProfileStore()
     let auth = AuthStore()
     let sync = CloudSync()
+    let dailyEnergy = DailyEnergyStore()
+    let proteinTargets = ProteinTargetStore()
 }
 
 @main
@@ -26,6 +28,8 @@ struct HealthTrackerApp: App {
     @StateObject private var profile = AppServices.shared.profile
     @StateObject private var auth = AppServices.shared.auth
     @StateObject private var sync = AppServices.shared.sync
+    @StateObject private var dailyEnergy = AppServices.shared.dailyEnergy
+    @StateObject private var proteinTargets = AppServices.shared.proteinTargets
 
     var body: some Scene {
         WindowGroup {
@@ -39,6 +43,8 @@ struct HealthTrackerApp: App {
                 .environmentObject(profile)
                 .environmentObject(auth)
                 .environmentObject(sync)
+                .environmentObject(dailyEnergy)
+                .environmentObject(proteinTargets)
         }
     }
 }

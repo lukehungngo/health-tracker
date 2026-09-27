@@ -23,8 +23,10 @@ struct HistoryView: View {
     @EnvironmentObject private var energy: EnergyStore
     @EnvironmentObject private var profile: ProfileStore
     @EnvironmentObject private var sync: CloudSync
+    @EnvironmentObject private var dailyEnergy: DailyEnergyStore
+    @EnvironmentObject private var proteinTargets: ProteinTargetStore
 
-    @State private var selectedDate = Date()
+    @Binding var selectedDate: Date
     @State private var workouts: [SyncedWorkout] = []
     @State private var sleepMinutes: Double?
     @State private var isLoading = false
@@ -45,6 +47,10 @@ struct HistoryView: View {
 
     private var dayEnergy: [EnergyEntry] {
         energy.entries.filter { Calendar.current.isDate($0.recordedAt, inSameDayAs: selectedDate) }
+    }
+
+    private var dayProteinTargets: [ProteinTargetEntry] {
+        proteinTargets.entries.filter { Calendar.current.isDate($0.recordedAt, inSameDayAs: selectedDate) }
     }
 
     var body: some View {
@@ -69,6 +75,27 @@ struct HistoryView: View {
             if isLoading { ProgressView("Loading history") }
             if let errorMessage {
                 Text(errorMessage).foregroundStyle(.red)
+            }
+
+            Section("Intake and burned") {
+                LabeledContent("Estimated intake", value: dayMeals.isEmpty
+                               ? "— (no meal log)"
+                               : "\(Int(mealEstimates.totalCalories(for: dayMeals))) kcal")
+                if mealEstimates.unestimatedCount(for: dayMeals) > 0 {
+                    Text("Intake is partial: some meals have no estimate.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                if let summary = dailyEnergy.summary(for: selectedDate, weights: weights.entries) {
+                    LabeledContent("Total burned", value: "\(Int(summary.totalKcal)) kcal")
+                    LabeledContent("Recorded", value: "\(Int(summary.measuredKcal)) kcal")
+                    LabeledContent("Estimated gaps", value: "\(Int(summary.estimatedKcal)) kcal")
+                    if summary.isPartial {
+                        Text("\(summary.uncoveredHours.formatted(.number.precision(.fractionLength(0...1)))) h cannot be estimated without a prior app weight.")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                } else {
+                    Text("Burned energy not loaded.").foregroundStyle(.secondary)
+                }
             }
 
             Section("Weight") {
@@ -101,6 +128,28 @@ struct HistoryView: View {
                     ForEach(dayEnergy) { entry in
                         LabeledContent(entry.kind.title,
                                        value: "\(Int(entry.kilocalories)) kcal/day · \(MetricSource.label(entry.source))")
+                    }
+                }
+            }
+
+            Section("Maintenance intake target for this date") {
+                if let target = energy.effective(for: .maintenance, on: selectedDate) {
+                    LabeledContent("Effective target", value: "\(Int(target.kilocalories)) kcal/day")
+                    LabeledContent("From", value: target.recordedAt.formatted(date: .abbreviated, time: .shortened))
+                    LabeledContent("Source", value: MetricSource.label(target.source))
+                } else {
+                    Text("No AI or manual intake target was in effect yet.")
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            Section("Protein target") {
+                if dayProteinTargets.isEmpty {
+                    Text("No protein target logged for this date.").foregroundStyle(.secondary)
+                } else {
+                    ForEach(dayProteinTargets) { entry in
+                        LabeledContent(entry.recordedAt.formatted(date: .omitted, time: .shortened),
+                                       value: "\(Int(entry.minGrams))–\(Int(entry.maxGrams)) g/day · \(MetricSource.label(entry.source))")
                     }
                 }
             }
@@ -207,6 +256,7 @@ struct HistoryView: View {
             guard !Task.isCancelled, activeLoadID == loadID else { return }
             workouts = loadedWorkouts
             sleepMinutes = Self.asleepMinutes(loadedSleep, from: sleepStart, to: sleepEnd)
+            await dailyEnergy.loadMonth(selectedDate, userID: userID)
         } catch {
             guard !Task.isCancelled, activeLoadID == loadID, !(error is CancellationError) else { return }
             workouts = []

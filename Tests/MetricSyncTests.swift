@@ -89,4 +89,54 @@ final class MetricSyncTests: XCTestCase {
         XCTAssertEqual(store.entries.count, 1)
         XCTAssertEqual(store.latest(for: .maintenance)?.kilocalories, 2_100)
     }
+
+    func testProteinTargetAIUpdateIsIdempotentAndRetainsPendingManualEntry() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let store = ProteinTargetStore(directory: directory)
+        let date = Date(timeIntervalSince1970: 1_700_000_000)
+        let id = UUID()
+        try store.merge([ProteinTargetEntry(id: id, recordedAt: date,
+                                            minGrams: 100, maxGrams: 130,
+                                            source: "ChatGPT", pendingUpload: false)])
+        try store.merge([ProteinTargetEntry(id: id, recordedAt: date,
+                                            minGrams: 110, maxGrams: 140,
+                                            source: "ChatGPT", pendingUpload: false)])
+        try store.merge([ProteinTargetEntry(id: id, recordedAt: date,
+                                            minGrams: 110, maxGrams: 140,
+                                            source: "ChatGPT", pendingUpload: false)])
+        XCTAssertEqual(store.entries.count, 1)
+        XCTAssertEqual(store.latest?.minGrams, 110)
+        XCTAssertEqual(store.latest?.maxGrams, 140)
+        XCTAssertEqual(store.latest.map { MetricSource.label($0.source) }, "AI")
+        try store.save(minGrams: 120, maxGrams: 150, recordedAt: date.addingTimeInterval(10))
+        XCTAssertEqual(store.pendingEntries.count, 1)
+        try store.merge([])
+        XCTAssertEqual(store.pendingEntries.count, 1)
+    }
+
+    func testMaintenanceIntakeCarriesForwardWithoutRewritingEarlierDays() throws {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+        func day(_ number: Int) -> Date {
+            calendar.date(from: DateComponents(year: 2026, month: 9, day: number, hour: 12))!
+        }
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let store = EnergyStore(directory: directory)
+        try store.merge([
+            EnergyEntry(id: UUID(), kind: .maintenance, recordedAt: day(10),
+                        kilocalories: 2_000, pendingUpload: false),
+            EnergyEntry(id: UUID(), kind: .maintenance, recordedAt: day(15),
+                        kilocalories: 2_100, source: "ChatGPT", pendingUpload: false)
+        ])
+        let now = day(27)
+        XCTAssertNil(store.effective(for: .maintenance, on: day(9), now: now, calendar: calendar))
+        for number in 10...14 {
+            XCTAssertEqual(store.effective(for: .maintenance, on: day(number), now: now,
+                                           calendar: calendar)?.kilocalories, 2_000)
+        }
+        XCTAssertEqual(store.effective(for: .maintenance, on: day(15), now: now,
+                                       calendar: calendar)?.kilocalories, 2_100)
+    }
 }

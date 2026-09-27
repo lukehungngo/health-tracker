@@ -10,9 +10,12 @@ struct TodayView: View {
     @EnvironmentObject private var profile: ProfileStore
     @EnvironmentObject private var auth: AuthStore
     @EnvironmentObject private var sync: CloudSync
+    @EnvironmentObject private var dailyEnergy: DailyEnergyStore
+    @EnvironmentObject private var proteinTargets: ProteinTargetStore
     @State private var showingWeightEntry = false
     @State private var showingLeanMassEntry = false
     @State private var editingEnergy: EnergyKind?
+    @State private var showingProteinTarget = false
 
     var body: some View {
         ScrollView {
@@ -47,7 +50,8 @@ struct TodayView: View {
                     Button {
                         if let userID = auth.userID {
                             Task { await sync.refreshValues(userID: userID, weights: weights,
-                                                            leanMass: leanMass, energy: energy) }
+                                                            leanMass: leanMass, energy: energy)
+                                await proteinTargets.sync(userID: userID) }
                         }
                     } label: {
                         if sync.isRefreshingValues || sync.isSyncing {
@@ -72,6 +76,8 @@ struct TodayView: View {
                                     await sync.run(userID: userID, meals: meals, weights: weights,
                                                    leanMass: leanMass, energy: energy, profile: profile,
                                                    mealEstimates: mealEstimates)
+                                    await dailyEnergy.loadMonth(.now, userID: userID, force: true)
+                                    await proteinTargets.sync(userID: userID)
                                 }
                             }
                         }
@@ -93,14 +99,12 @@ struct TodayView: View {
                                    format: "%.1f", unit: "kg", icon: "scalemass",
                                    source: weights.entries.first.map { MetricSource.label($0.source) } ?? "No value",
                                    recordedAt: weights.entries.first?.measuredAt,
-                                   detail: "App or AI entry; Apple Health weight is not imported.",
                                    action: { showingWeightEntry = true })
                     editableMetric("Fat-free mass", value: selectedLeanMassKg,
                                    format: "%.1f", unit: "kg", icon: "figure.strengthtraining.traditional",
                                    source: leanMass.entries.first.map { MetricSource.label($0.source) }
                                        ?? (health.today.appleLeanMassKg == nil ? "No value" : "Apple Health"),
                                    recordedAt: leanMass.entries.first?.measuredAt,
-                                   detail: "Includes more than skeletal muscle. Check the label on your scale.",
                                    action: { showingLeanMassEntry = true })
                     metric("Steps", value: health.today.steps, format: "%.0f", unit: "steps", icon: "figure.walk")
                     metric("Active energy", value: health.today.activeKcal, format: "%.0f", unit: "kcal", icon: "flame")
@@ -111,28 +115,37 @@ struct TodayView: View {
                                    source: energy.latest(for: .basal).map { MetricSource.label($0.source) }
                                        ?? (health.today.basalKcal == nil ? "No value" : "Apple Health"),
                                    recordedAt: energy.latest(for: .basal)?.recordedAt,
-                                   detail: energy.latest(for: .basal) == nil
-                                       ? "Apple Health measures today's burn; AI/manual can provide a separate daily estimate."
-                                       : "Daily estimate; Apple Health measurements remain unchanged.",
                                    action: { editingEnergy = .basal })
-                    editableMetric("Maintenance intake", value: energy.latest(for: .maintenance)?.kilocalories
+                    editableMetric("Maintenance intake", value: maintenanceTarget?.kilocalories
                                        ?? maintenanceEstimate?.kilocalories,
                                    format: "%.0f", unit: "kcal/day", icon: "equal.circle",
-                                   source: energy.latest(for: .maintenance).map { MetricSource.label($0.source) }
+                                   source: maintenanceTarget.map { MetricSource.label($0.source) }
                                        ?? (maintenanceEstimate == nil ? "No value" : "Formula"),
-                                   recordedAt: energy.latest(for: .maintenance)?.recordedAt,
-                                   detail: energy.latest(for: .maintenance) == nil
-                                       ? "\(maintenanceEstimate?.formula ?? "Needs body measurements or profile") · seated-day estimate."
-                                       : "Latest AI/manual estimate; not measured burn or a weight-loss target.",
+                                   recordedAt: maintenanceTarget?.recordedAt,
                                    action: { editingEnergy = .maintenance })
-                    if let proteinRange {
-                        Text("Protein reference to retain lean mass: \(Int(proteinRange.lowerGrams.rounded()))–\(Int(proteinRange.upperGrams.rounded())) g/day")
-                            .font(.subheadline.bold())
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                        Text("\(proteinRange.basis), for regular resistance training during a calorie deficit. A reference range, not a medical prescription.")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
+                    TimelineView(.periodic(from: .now, by: 60)) { timeline in
+                        if let burned = dailyEnergy.summary(for: timeline.date, now: timeline.date,
+                                                            weights: weights.entries) {
+                            VStack(alignment: .leading, spacing: 4) {
+                                metric("Total burned so far", value: burned.totalKcal,
+                                       format: "%.0f", unit: "kcal", icon: "flame.circle")
+                                Text("\(Int(burned.measuredKcal)) recorded · \(Int(burned.estimatedKcal)) estimated for missing hours")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                if burned.isPartial {
+                                    Text("Some hours need an earlier app-entered weight to estimate.")
+                                        .font(.caption).foregroundStyle(.secondary)
+                                }
+                            }
+                        }
                     }
+                    editableMetric("Protein target",
+                                   displayValue: proteinTargetDisplay,
+                                   icon: "figure.strengthtraining.traditional",
+                                   source: proteinTargets.latest.map { MetricSource.label($0.source) }
+                                       ?? (proteinRange == nil ? "No value" : "Formula"),
+                                   recordedAt: proteinTargets.latest?.recordedAt,
+                                   action: { showingProteinTarget = true })
                     metric("Workouts", value: health.today.workoutMinutes, format: "%.0f", unit: "min", icon: "figure.run")
                     metric("Sleep (last 24h)", value: health.today.sleepMinutes, format: "%.0f", unit: "min", icon: "moon")
                 }
@@ -196,6 +209,11 @@ struct TodayView: View {
         }
         .navigationTitle("Today")
         .navigationBarTitleDisplayMode(.inline)
+        .onChange(of: sync.lastSuccess) { _, _ in
+            if let userID = auth.userID {
+                Task { await dailyEnergy.loadMonth(.now, userID: userID, force: true) }
+            }
+        }
         .sheet(isPresented: $showingWeightEntry) {
             AddWeightView()
                 .environmentObject(weights)
@@ -226,6 +244,11 @@ struct TodayView: View {
                 .environmentObject(auth)
                 .environmentObject(sync)
         }
+        .sheet(isPresented: $showingProteinTarget) {
+            AddProteinTargetView()
+                .environmentObject(proteinTargets)
+                .environmentObject(auth)
+        }
     }
 
     private var selectedLeanMassKg: Double? {
@@ -233,14 +256,15 @@ struct TodayView: View {
     }
 
     private var isAnySyncRunning: Bool {
-        sync.isSyncing || sync.isRefreshingValues || sync.isRefreshingMeals || health.isRefreshing
+        sync.isSyncing || sync.isRefreshingValues || sync.isRefreshingMeals ||
+            proteinTargets.isSyncing || health.isRefreshing
     }
 
     private var syncError: String? {
         if let error = sync.valueMessage, !sync.isRefreshingValues { return error }
         if let error = sync.mealMessage, !sync.isRefreshingMeals { return error }
         if let error = sync.message, !sync.isSyncing, error != "Health data synced." { return error }
-        return health.errorMessage ?? weights.errorMessage
+        return proteinTargets.errorMessage ?? health.errorMessage ?? weights.errorMessage
     }
 
     private var maintenanceEstimate: MaintenanceEstimate? {
@@ -253,9 +277,21 @@ struct TodayView: View {
         )
     }
 
+    private var maintenanceTarget: EnergyEntry? {
+        energy.effective(for: .maintenance, on: .now)
+    }
+
     private var proteinRange: ProteinRange? {
         ProteinRecommendation.dailyRange(leanMassKg: selectedLeanMassKg,
                                          weightKg: weights.entries.first?.kilograms)
+    }
+
+    private var proteinTargetDisplay: String {
+        if let entry = proteinTargets.latest {
+            return "\(Int(entry.minGrams.rounded()))–\(Int(entry.maxGrams.rounded())) g/day"
+        }
+        guard let range = proteinRange else { return "—" }
+        return "\(Int(range.lowerGrams.rounded()))–\(Int(range.upperGrams.rounded())) g/day"
     }
 
     private func metric(_ title: String, value: Double?, format: String, unit: String, icon: String) -> some View {
@@ -277,12 +313,19 @@ struct TodayView: View {
     }
 
     private func editableMetric(_ title: String, value: Double?, format: String, unit: String,
-                                icon: String, source: String, recordedAt: Date?, detail: String,
+                                icon: String, source: String, recordedAt: Date?,
                                 action: @escaping () -> Void) -> some View {
         let displayValue = value.map { String(format: format, $0) + " " + unit } ?? "—"
+        return editableMetric(title, displayValue: displayValue, icon: icon,
+                              source: source, recordedAt: recordedAt, action: action)
+    }
+
+    private func editableMetric(_ title: String, displayValue: String, icon: String,
+                                source: String, recordedAt: Date?,
+                                action: @escaping () -> Void) -> some View {
         return Button(action: action) {
-            VStack(alignment: .leading, spacing: 10) {
-                HStack(alignment: .top, spacing: 12) {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(alignment: .center, spacing: 12) {
                     Image(systemName: icon)
                         .frame(width: 28)
                         .foregroundStyle(.teal)
@@ -293,25 +336,23 @@ struct TodayView: View {
                         .foregroundStyle(.teal)
                         .accessibilityHidden(true)
                 }
-                Text(displayValue)
-                    .font(.title2.bold())
-                    .monospacedDigit()
-                VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 8) {
                     Text(source)
                         .font(.caption.bold())
                         .padding(.horizontal, 8)
                         .padding(.vertical, 4)
                         .background(.quaternary, in: Capsule())
                     if let recordedAt {
-                        Text(recordedAt, format: .dateTime.day().month().hour().minute())
+                        Text("Updated \(recordedAt.formatted(.dateTime.day().month().hour().minute()))")
                             .font(.caption)
                             .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.8)
                     }
                 }
-                Text(detail)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.leading)
+                Text(displayValue)
+                    .font(.title2.bold())
+                    .monospacedDigit()
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(16)

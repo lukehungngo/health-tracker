@@ -45,7 +45,7 @@ targets:
   PersonalHealthTrackerTests:
     type: bundle.unit-test
     platform: iOS
-    sources: [Tests/MealSyncTests.swift, Tests/MetricSyncTests.swift]
+    sources: [Tests/MealSyncTests.swift, Tests/MetricSyncTests.swift, Tests/HourlyEnergyTests.swift]
     dependencies:
       - target: PersonalHealthTracker
     settings:

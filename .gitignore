@@ -5,3 +5,4 @@ PersonalHealthTracker.xcodeproj/
 Config/Local.xcconfig
 *.xcuserstate
 xcuserdata/
+supabase/.temp/
