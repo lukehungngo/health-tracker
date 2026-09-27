@@ -1,9 +1,33 @@
 import Foundation
 
-struct LeanMassEntry: Codable, Identifiable {
+struct LeanMassEntry: Codable, Identifiable, Equatable {
     let id: UUID
     let measuredAt: Date
     let kilograms: Double
+    let source: String
+    let pendingUpload: Bool
+
+    init(id: UUID, measuredAt: Date, kilograms: Double,
+         source: String = MetricSource.manual, pendingUpload: Bool = true) {
+        self.id = id
+        self.measuredAt = measuredAt
+        self.kilograms = kilograms
+        self.source = source
+        self.pendingUpload = pendingUpload
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, measuredAt, kilograms, source, pendingUpload
+    }
+
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        id = try values.decode(UUID.self, forKey: .id)
+        measuredAt = try values.decode(Date.self, forKey: .measuredAt)
+        kilograms = try values.decode(Double.self, forKey: .kilograms)
+        source = try values.decodeIfPresent(String.self, forKey: .source) ?? MetricSource.manual
+        pendingUpload = try values.decodeIfPresent(Bool.self, forKey: .pendingUpload) ?? true
+    }
 }
 
 @MainActor
@@ -13,9 +37,9 @@ final class LeanMassStore: ObservableObject {
 
     private let indexURL: URL
 
-    init() {
+    init(directory: URL? = nil) {
         let documents = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
-        let directory = documents.appendingPathComponent("LeanMass", isDirectory: true)
+        let directory = directory ?? documents.appendingPathComponent("LeanMass", isDirectory: true)
         indexURL = directory.appendingPathComponent("lean-mass.json")
         do {
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
@@ -34,19 +58,32 @@ final class LeanMassStore: ObservableObject {
             throw LeanMassError.invalidEntry
         }
         let entry = LeanMassEntry(id: UUID(), measuredAt: measuredAt, kilograms: kilograms)
-        let updated = ([entry] + entries).sorted { $0.measuredAt > $1.measuredAt }
-        try JSONEncoder().encode(updated).write(to: indexURL, options: [.atomic, .completeFileProtection])
-        entries = updated
+        try persist(([entry] + entries).sorted { $0.measuredAt > $1.measuredAt })
     }
 
+    var pendingEntries: [LeanMassEntry] { entries.filter(\.pendingUpload) }
+
     func merge(_ remote: [LeanMassEntry]) throws {
-        let existing = Set(entries.map(\.id))
-        let newEntries = remote.filter { !existing.contains($0.id) }
-        guard !newEntries.isEmpty else { return }
-        guard newEntries.allSatisfy({ $0.kilograms.isFinite && (10...200).contains($0.kilograms) }) else {
+        guard remote.allSatisfy({ $0.kilograms.isFinite && (10...200).contains($0.kilograms) }) else {
             throw LeanMassError.invalidEntry
         }
-        let updated = (entries + newEntries).sorted { $0.measuredAt > $1.measuredAt }
+        let remoteIDs = Set(remote.map(\.id))
+        let pending = entries.filter { $0.pendingUpload && !remoteIDs.contains($0.id) }
+        let updated = (remote + pending).sorted { $0.measuredAt > $1.measuredAt }
+        if updated != entries { try persist(updated) }
+    }
+
+    func markUploaded(_ ids: Set<UUID>) throws {
+        let updated = entries.map { entry in
+            guard ids.contains(entry.id) else { return entry }
+            return LeanMassEntry(id: entry.id, measuredAt: entry.measuredAt,
+                                 kilograms: entry.kilograms, source: entry.source,
+                                 pendingUpload: false)
+        }
+        if updated != entries { try persist(updated) }
+    }
+
+    private func persist(_ updated: [LeanMassEntry]) throws {
         try JSONEncoder().encode(updated).write(to: indexURL, options: [.atomic, .completeFileProtection])
         entries = updated
     }

@@ -6,6 +6,7 @@ struct RootView: View {
     @EnvironmentObject private var mealEstimates: MealEstimateStore
     @EnvironmentObject private var weights: WeightStore
     @EnvironmentObject private var leanMass: LeanMassStore
+    @EnvironmentObject private var energy: EnergyStore
     @EnvironmentObject private var profile: ProfileStore
     @EnvironmentObject private var auth: AuthStore
     @EnvironmentObject private var sync: CloudSync
@@ -37,14 +38,14 @@ struct RootView: View {
             await auth.restore()
             await health.refresh()
             if let userID = auth.userID {
-                await sync.run(userID: userID, meals: meals, weights: weights, leanMass: leanMass, profile: profile, mealEstimates: mealEstimates)
+                await sync.run(userID: userID, meals: meals, weights: weights, leanMass: leanMass, energy: energy, profile: profile, mealEstimates: mealEstimates)
             }
         }
         .onOpenURL { url in
             Task {
                 await auth.handleCallback(url)
                 if let userID = auth.userID {
-                    await sync.run(userID: userID, meals: meals, weights: weights, leanMass: leanMass, profile: profile, mealEstimates: mealEstimates)
+                    await sync.run(userID: userID, meals: meals, weights: weights, leanMass: leanMass, energy: energy, profile: profile, mealEstimates: mealEstimates)
                 }
             }
         }

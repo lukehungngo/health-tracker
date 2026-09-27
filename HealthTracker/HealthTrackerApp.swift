@@ -8,6 +8,7 @@ final class AppServices {
     let mealEstimates = MealEstimateStore()
     let weights = WeightStore()
     let leanMass = LeanMassStore()
+    let energy = EnergyStore()
     let profile = ProfileStore()
     let auth = AuthStore()
     let sync = CloudSync()
@@ -21,6 +22,7 @@ struct HealthTrackerApp: App {
     @StateObject private var mealEstimates = AppServices.shared.mealEstimates
     @StateObject private var weights = AppServices.shared.weights
     @StateObject private var leanMass = AppServices.shared.leanMass
+    @StateObject private var energy = AppServices.shared.energy
     @StateObject private var profile = AppServices.shared.profile
     @StateObject private var auth = AppServices.shared.auth
     @StateObject private var sync = AppServices.shared.sync
@@ -33,6 +35,7 @@ struct HealthTrackerApp: App {
                 .environmentObject(mealEstimates)
                 .environmentObject(weights)
                 .environmentObject(leanMass)
+                .environmentObject(energy)
                 .environmentObject(profile)
                 .environmentObject(auth)
                 .environmentObject(sync)

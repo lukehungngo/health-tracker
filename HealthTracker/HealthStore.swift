@@ -5,7 +5,7 @@ struct TodaySnapshot {
     var appleHeightCm: Double?
     var appleLeanMassKg: Double?
     var appleBirthDate: Date?
-    var appleSex: FormulaSex?
+    var appleGender: FormulaGender?
     var steps: Double?
     var activeKcal: Double?
     var basalKcal: Double?
@@ -92,7 +92,7 @@ final class HealthStore: ObservableObject {
                 appleHeightCm: try await latestQuantity(.height, unit: .meterUnit(with: .centi)),
                 appleLeanMassKg: try await latestQuantity(.leanBodyMass, unit: .gramUnit(with: .kilo)),
                 appleBirthDate: (try? store.dateOfBirthComponents()).flatMap { Calendar.current.date(from: $0) },
-                appleSex: Self.formulaSex(from: try? store.biologicalSex().biologicalSex),
+                appleGender: Self.formulaGender(from: try? store.biologicalSex().biologicalSex),
                 steps: try await sum(.stepCount, unit: .count(), from: start, to: end),
                 activeKcal: try await sum(.activeEnergyBurned, unit: .kilocalorie(), from: start, to: end),
                 basalKcal: try await sum(.basalEnergyBurned, unit: .kilocalorie(), from: start, to: end),
@@ -106,7 +106,7 @@ final class HealthStore: ObservableObject {
 #endif
     }
 
-    private static func formulaSex(from value: HKBiologicalSex?) -> FormulaSex? {
+    private static func formulaGender(from value: HKBiologicalSex?) -> FormulaGender? {
         switch value {
         case .male: .male
         case .female: .female

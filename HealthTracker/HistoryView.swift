@@ -20,6 +20,7 @@ struct HistoryView: View {
     @EnvironmentObject private var mealEstimates: MealEstimateStore
     @EnvironmentObject private var weights: WeightStore
     @EnvironmentObject private var leanMass: LeanMassStore
+    @EnvironmentObject private var energy: EnergyStore
     @EnvironmentObject private var profile: ProfileStore
     @EnvironmentObject private var sync: CloudSync
 
@@ -40,6 +41,10 @@ struct HistoryView: View {
 
     private var dayLeanMass: [LeanMassEntry] {
         leanMass.entries.filter { Calendar.current.isDate($0.measuredAt, inSameDayAs: selectedDate) }
+    }
+
+    private var dayEnergy: [EnergyEntry] {
+        energy.entries.filter { Calendar.current.isDate($0.recordedAt, inSameDayAs: selectedDate) }
     }
 
     var body: some View {
@@ -66,24 +71,36 @@ struct HistoryView: View {
                 Text(errorMessage).foregroundStyle(.red)
             }
 
-            Section("Weight entered in this app") {
+            Section("Weight") {
                 if dayWeights.isEmpty {
-                    Text("No weight entered for this date.").foregroundStyle(.secondary)
+                    Text("No weight logged for this date.").foregroundStyle(.secondary)
                 } else {
                     ForEach(dayWeights) { entry in
                         LabeledContent(entry.measuredAt.formatted(date: .omitted, time: .shortened),
-                                       value: "\(entry.kilograms.formatted(.number.precision(.fractionLength(1)))) kg")
+                                       value: "\(entry.kilograms.formatted(.number.precision(.fractionLength(1)))) kg · \(MetricSource.label(entry.source))")
                     }
                 }
             }
 
-            Section("Lean body mass entered in this app") {
+            Section("Fat-free mass") {
                 if dayLeanMass.isEmpty {
-                    Text("No lean mass entered for this date.").foregroundStyle(.secondary)
+                    Text("No fat-free mass logged for this date.").foregroundStyle(.secondary)
                 } else {
                     ForEach(dayLeanMass) { entry in
                         LabeledContent(entry.measuredAt.formatted(date: .omitted, time: .shortened),
-                                       value: "\(entry.kilograms.formatted(.number.precision(.fractionLength(1)))) kg")
+                                       value: "\(entry.kilograms.formatted(.number.precision(.fractionLength(1)))) kg · \(MetricSource.label(entry.source))")
+                    }
+                }
+            }
+
+            Section("Daily energy estimates") {
+                if dayEnergy.isEmpty {
+                    Text("No AI or manual energy estimate logged for this date.")
+                        .foregroundStyle(.secondary)
+                } else {
+                    ForEach(dayEnergy) { entry in
+                        LabeledContent(entry.kind.title,
+                                       value: "\(Int(entry.kilocalories)) kcal/day · \(MetricSource.label(entry.source))")
                     }
                 }
             }

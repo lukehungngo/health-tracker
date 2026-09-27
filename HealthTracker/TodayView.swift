@@ -6,111 +6,125 @@ struct TodayView: View {
     @EnvironmentObject private var mealEstimates: MealEstimateStore
     @EnvironmentObject private var weights: WeightStore
     @EnvironmentObject private var leanMass: LeanMassStore
+    @EnvironmentObject private var energy: EnergyStore
     @EnvironmentObject private var profile: ProfileStore
     @EnvironmentObject private var auth: AuthStore
     @EnvironmentObject private var sync: CloudSync
     @State private var showingWeightEntry = false
     @State private var showingLeanMassEntry = false
+    @State private var editingEnergy: EnergyKind?
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 24) {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text(Date.now, format: .dateTime.weekday(.wide).month(.wide).day())
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                    Text("Today")
-                        .font(.largeTitle.bold())
-                    Text(auth.userID == nil ? "Sign in under Settings to sync with Supabase." : "Connected to Supabase")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: 8) {
+                        Text(Date.now, format: .dateTime.weekday(.wide).month(.wide).day())
+                            .fixedSize()
+                        Spacer(minLength: 8)
+                        Text(auth.userID == nil ? "Sign in to sync" : "Cloud connected")
+                            .fixedSize()
+                    }
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(Date.now, format: .dateTime.weekday(.wide).month(.wide).day())
+                        Text(auth.userID == nil ? "Sign in to sync" : "Cloud connected")
+                    }
                 }
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
 
-                if let error = health.errorMessage {
-                    Label(error, systemImage: "exclamationmark.circle")
+                HStack(spacing: 12) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Body & energy").font(.title2.bold())
+                        Text(sync.isRefreshingValues || sync.isRefreshingMeals || sync.isSyncing
+                             ? "Syncing…"
+                             : sync.lastValueSync.map { "Values updated \($0.formatted(date: .omitted, time: .shortened))" }
+                               ?? (auth.userID == nil ? "Sign in to sync" : "Values not yet synced"))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer(minLength: 8)
+                    Button {
+                        if let userID = auth.userID {
+                            Task { await sync.refreshValues(userID: userID, weights: weights,
+                                                            leanMass: leanMass, energy: energy) }
+                        }
+                    } label: {
+                        if sync.isRefreshingValues || sync.isSyncing {
+                            ProgressView().frame(minWidth: 44, minHeight: 44)
+                        } else {
+                            Image(systemName: "arrow.clockwise")
+                                .frame(minWidth: 44, minHeight: 44)
+                        }
+                    }
+                    .accessibilityLabel("Sync body values")
+                    .disabled(auth.userID == nil || isAnySyncRunning)
+                    Menu {
+                        Button("Refresh meals") {
+                            if let userID = auth.userID {
+                                Task { await sync.refreshMeals(userID: userID, meals: meals, mealEstimates: mealEstimates) }
+                            }
+                        }
+                        Button("Sync all, including Apple Health") {
+                            Task {
+                                await health.refresh()
+                                if let userID = auth.userID {
+                                    await sync.run(userID: userID, meals: meals, weights: weights,
+                                                   leanMass: leanMass, energy: energy, profile: profile,
+                                                   mealEstimates: mealEstimates)
+                                }
+                            }
+                        }
+                    } label: {
+                        Image(systemName: "ellipsis.circle")
+                            .frame(minWidth: 44, minHeight: 44)
+                    }
+                    .accessibilityLabel("More sync options")
+                    .disabled(auth.userID == nil || isAnySyncRunning)
+                }
+                if let syncError {
+                    Label(syncError, systemImage: "exclamationmark.circle.fill")
+                        .font(.subheadline)
                         .foregroundStyle(.red)
                         .accessibilityAddTraits(.updatesFrequently)
                 }
-                if let error = weights.errorMessage {
-                    Label(error, systemImage: "exclamationmark.circle")
-                        .foregroundStyle(.red)
-                }
-
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Last Health refresh")
-                        .font(.headline)
-                    Text(health.lastRefresh?.formatted(date: .abbreviated, time: .shortened) ?? "Not yet refreshed")
-                        .foregroundStyle(.secondary)
-                    Text("Last Health upload: \(auth.userID == nil ? "Not signed in" : sync.lastSuccess?.formatted(date: .abbreviated, time: .shortened) ?? "Not yet completed")")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                    Text("Last meal refresh: \(auth.userID == nil ? "Not signed in" : sync.lastMealSync?.formatted(date: .abbreviated, time: .shortened) ?? "Not yet refreshed")")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                    if let message = sync.message { Text(message).font(.subheadline) }
-                    if let message = sync.mealMessage { Text(message).font(.subheadline) }
-                    Button {
-                        Task {
-                            await health.refresh()
-                            if let userID = auth.userID { await sync.run(userID: userID, meals: meals, weights: weights, leanMass: leanMass, profile: profile, mealEstimates: mealEstimates) }
-                        }
-                    } label: {
-                        if health.isRefreshing { ProgressView() }
-                        else { Label("Refresh and Sync", systemImage: "arrow.clockwise") }
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .disabled(health.isRefreshing || sync.isSyncing)
-                    .frame(minHeight: 44)
-                    if let userID = auth.userID {
-                        Button {
-                            Task { await sync.refreshMeals(userID: userID, meals: meals, mealEstimates: mealEstimates) }
-                        } label: {
-                            Label("Refresh meals", systemImage: "fork.knife")
-                        }
-                        .disabled(sync.isRefreshingMeals)
-                        .frame(minHeight: 44)
-                    }
-                }
-
                 VStack(spacing: 12) {
-                    metric("Latest weight (entered here)", value: weights.entries.first?.kilograms, format: "%.1f", unit: "kg", icon: "scalemass")
-                    if let latest = weights.entries.first {
-                        Text("Recorded \(latest.measuredAt.formatted(date: .abbreviated, time: .shortened))")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                    }
-                    Button {
-                        showingWeightEntry = true
-                    } label: {
-                        Label("Log weight", systemImage: "plus")
-                    }
-                    .buttonStyle(.bordered)
-                    .frame(minHeight: 44)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    metric("Lean body mass (fat-free)", value: selectedLeanMassKg,
-                           format: "%.1f", unit: "kg", icon: "figure.strengthtraining.traditional")
-                    Text(leanMass.entries.first != nil ? "Source: entered in this app" :
-                            (health.today.appleLeanMassKg != nil ? "Source: Apple Health" : "No lean-mass measurement yet"))
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                    Button {
-                        showingLeanMassEntry = true
-                    } label: {
-                        Label("Log lean mass", systemImage: "plus")
-                    }
-                    .buttonStyle(.bordered)
-                    .frame(minHeight: 44)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                    editableMetric("Weight", value: weights.entries.first?.kilograms,
+                                   format: "%.1f", unit: "kg", icon: "scalemass",
+                                   source: weights.entries.first.map { MetricSource.label($0.source) } ?? "No value",
+                                   recordedAt: weights.entries.first?.measuredAt,
+                                   detail: "App or AI entry; Apple Health weight is not imported.",
+                                   action: { showingWeightEntry = true })
+                    editableMetric("Fat-free mass", value: selectedLeanMassKg,
+                                   format: "%.1f", unit: "kg", icon: "figure.strengthtraining.traditional",
+                                   source: leanMass.entries.first.map { MetricSource.label($0.source) }
+                                       ?? (health.today.appleLeanMassKg == nil ? "No value" : "Apple Health"),
+                                   recordedAt: leanMass.entries.first?.measuredAt,
+                                   detail: "Includes more than skeletal muscle. Check the label on your scale.",
+                                   action: { showingLeanMassEntry = true })
                     metric("Steps", value: health.today.steps, format: "%.0f", unit: "steps", icon: "figure.walk")
                     metric("Active energy", value: health.today.activeKcal, format: "%.0f", unit: "kcal", icon: "flame")
-                    metric("Basal energy", value: health.today.basalKcal, format: "%.0f", unit: "kcal", icon: "bolt.heart")
-                    metric("Estimated intake to maintain", value: maintenanceEstimate?.kilocalories,
-                           format: "%.0f", unit: "kcal/day", icon: "equal.circle")
-                    Text("Formula: \(maintenanceEstimate?.formula ?? "needs lean mass, or weight + height + birth date + sex"). Mostly seated-day estimate; not measured burn or a weight-loss target.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                    editableMetric(energy.latest(for: .basal) == nil ? "Basal energy today" : "Estimated basal energy",
+                                   value: energy.latest(for: .basal)?.kilocalories ?? health.today.basalKcal,
+                                   format: "%.0f", unit: energy.latest(for: .basal) == nil ? "kcal" : "kcal/day",
+                                   icon: "bolt.heart",
+                                   source: energy.latest(for: .basal).map { MetricSource.label($0.source) }
+                                       ?? (health.today.basalKcal == nil ? "No value" : "Apple Health"),
+                                   recordedAt: energy.latest(for: .basal)?.recordedAt,
+                                   detail: energy.latest(for: .basal) == nil
+                                       ? "Apple Health measures today's burn; AI/manual can provide a separate daily estimate."
+                                       : "Daily estimate; Apple Health measurements remain unchanged.",
+                                   action: { editingEnergy = .basal })
+                    editableMetric("Maintenance intake", value: energy.latest(for: .maintenance)?.kilocalories
+                                       ?? maintenanceEstimate?.kilocalories,
+                                   format: "%.0f", unit: "kcal/day", icon: "equal.circle",
+                                   source: energy.latest(for: .maintenance).map { MetricSource.label($0.source) }
+                                       ?? (maintenanceEstimate == nil ? "No value" : "Formula"),
+                                   recordedAt: energy.latest(for: .maintenance)?.recordedAt,
+                                   detail: energy.latest(for: .maintenance) == nil
+                                       ? "\(maintenanceEstimate?.formula ?? "Needs body measurements or profile") · seated-day estimate."
+                                       : "Latest AI/manual estimate; not measured burn or a weight-loss target.",
+                                   action: { editingEnergy = .maintenance })
                     if let proteinRange {
                         Text("Protein reference to retain lean mass: \(Int(proteinRange.lowerGrams.rounded()))–\(Int(proteinRange.upperGrams.rounded())) g/day")
                             .font(.subheadline.bold())
@@ -186,6 +200,7 @@ struct TodayView: View {
             AddWeightView()
                 .environmentObject(weights)
                 .environmentObject(leanMass)
+                .environmentObject(energy)
                 .environmentObject(profile)
                 .environmentObject(meals)
                 .environmentObject(mealEstimates)
@@ -195,10 +210,19 @@ struct TodayView: View {
         .sheet(isPresented: $showingLeanMassEntry) {
             AddLeanMassView()
                 .environmentObject(leanMass)
+                .environmentObject(energy)
                 .environmentObject(weights)
                 .environmentObject(profile)
                 .environmentObject(meals)
                 .environmentObject(mealEstimates)
+                .environmentObject(auth)
+                .environmentObject(sync)
+        }
+        .sheet(item: $editingEnergy) { kind in
+            AddEnergyView(kind: kind)
+                .environmentObject(energy)
+                .environmentObject(weights)
+                .environmentObject(leanMass)
                 .environmentObject(auth)
                 .environmentObject(sync)
         }
@@ -208,13 +232,24 @@ struct TodayView: View {
         leanMass.entries.first?.kilograms ?? health.today.appleLeanMassKg
     }
 
+    private var isAnySyncRunning: Bool {
+        sync.isSyncing || sync.isRefreshingValues || sync.isRefreshingMeals || health.isRefreshing
+    }
+
+    private var syncError: String? {
+        if let error = sync.valueMessage, !sync.isRefreshingValues { return error }
+        if let error = sync.mealMessage, !sync.isRefreshingMeals { return error }
+        if let error = sync.message, !sync.isSyncing, error != "Health data synced." { return error }
+        return health.errorMessage ?? weights.errorMessage
+    }
+
     private var maintenanceEstimate: MaintenanceEstimate? {
         MaintenanceEnergy.dailyEstimate(
             leanMassKg: selectedLeanMassKg,
             weightKg: weights.entries.first?.kilograms,
             heightCm: profile.selectedHeightCm(appleHeightCm: health.today.appleHeightCm),
             birthDate: profile.selectedBirthDate(appleBirthDate: health.today.appleBirthDate),
-            sex: profile.selectedSex(appleSex: health.today.appleSex)
+            gender: profile.selectedGender(appleGender: health.today.appleGender)
         )
     }
 
@@ -239,5 +274,51 @@ struct TodayView: View {
         .frame(minHeight: 56)
         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14))
         .accessibilityElement(children: .combine)
+    }
+
+    private func editableMetric(_ title: String, value: Double?, format: String, unit: String,
+                                icon: String, source: String, recordedAt: Date?, detail: String,
+                                action: @escaping () -> Void) -> some View {
+        let displayValue = value.map { String(format: format, $0) + " " + unit } ?? "—"
+        return Button(action: action) {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(alignment: .top, spacing: 12) {
+                    Image(systemName: icon)
+                        .frame(width: 28)
+                        .foregroundStyle(.teal)
+                        .accessibilityHidden(true)
+                    Text(title).font(.headline)
+                    Spacer(minLength: 8)
+                    Image(systemName: "square.and.pencil")
+                        .foregroundStyle(.teal)
+                        .accessibilityHidden(true)
+                }
+                Text(displayValue)
+                    .font(.title2.bold())
+                    .monospacedDigit()
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(source)
+                        .font(.caption.bold())
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(.quaternary, in: Capsule())
+                    if let recordedAt {
+                        Text(recordedAt, format: .dateTime.day().month().hour().minute())
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                Text(detail)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.leading)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(16)
+            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14))
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("\(title), \(displayValue), source \(source)")
+        .accessibilityHint("Opens the form to log a new value")
     }
 }

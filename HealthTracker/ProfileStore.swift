@@ -6,17 +6,48 @@ struct HeightEntry: Codable {
     let centimeters: Double
 }
 
-enum FormulaSex: String, Codable, CaseIterable, Identifiable {
+enum FormulaGender: String, Codable, CaseIterable, Identifiable {
     case male = "Male"
     case female = "Female"
     var id: String { rawValue }
 }
 
-private struct FormulaOverrides: Codable {
+struct FormulaOverrides: Codable {
     var birthDate: Date?
-    var sex: FormulaSex?
+    var gender: FormulaGender?
     var useManualBirthDate: Bool
-    var useManualSex: Bool
+    var useManualGender: Bool
+
+    private enum CodingKeys: String, CodingKey {
+        case birthDate, gender, useManualBirthDate, useManualGender
+        case legacySex = "sex"
+        case legacyUseManualSex = "useManualSex"
+    }
+
+    init(birthDate: Date?, gender: FormulaGender?, useManualBirthDate: Bool, useManualGender: Bool) {
+        self.birthDate = birthDate
+        self.gender = gender
+        self.useManualBirthDate = useManualBirthDate
+        self.useManualGender = useManualGender
+    }
+
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        birthDate = try values.decodeIfPresent(Date.self, forKey: .birthDate)
+        gender = try values.decodeIfPresent(FormulaGender.self, forKey: .gender)
+            ?? values.decodeIfPresent(FormulaGender.self, forKey: .legacySex)
+        useManualBirthDate = try values.decode(Bool.self, forKey: .useManualBirthDate)
+        useManualGender = try values.decodeIfPresent(Bool.self, forKey: .useManualGender)
+            ?? values.decode(Bool.self, forKey: .legacyUseManualSex)
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var values = encoder.container(keyedBy: CodingKeys.self)
+        try values.encodeIfPresent(birthDate, forKey: .birthDate)
+        try values.encodeIfPresent(gender, forKey: .gender)
+        try values.encode(useManualBirthDate, forKey: .useManualBirthDate)
+        try values.encode(useManualGender, forKey: .useManualGender)
+    }
 }
 
 @MainActor
@@ -27,9 +58,9 @@ final class ProfileStore: ObservableObject {
     }
     @Published var errorMessage: String?
     @Published private(set) var manualBirthDate: Date?
-    @Published private(set) var manualSex: FormulaSex?
+    @Published private(set) var manualGender: FormulaGender?
     @Published private(set) var useManualBirthDate = false
-    @Published private(set) var useManualSex = false
+    @Published private(set) var useManualGender = false
 
     private let indexURL: URL
     private let overridesURL: URL
@@ -49,9 +80,9 @@ final class ProfileStore: ObservableObject {
             if FileManager.default.fileExists(atPath: overridesURL.path) {
                 let saved = try JSONDecoder().decode(FormulaOverrides.self, from: Data(contentsOf: overridesURL))
                 manualBirthDate = saved.birthDate
-                manualSex = saved.sex
+                manualGender = saved.gender
                 useManualBirthDate = saved.useManualBirthDate
-                useManualSex = saved.useManualSex
+                useManualGender = saved.useManualGender
             }
         } catch {
             errorMessage = "Saved height could not be loaded: \(error.localizedDescription)"
@@ -82,28 +113,28 @@ final class ProfileStore: ObservableObject {
         useManualBirthDate ? manualBirthDate : appleBirthDate
     }
 
-    func selectedSex(appleSex: FormulaSex?) -> FormulaSex? {
-        useManualSex ? manualSex : appleSex
+    func selectedGender(appleGender: FormulaGender?) -> FormulaGender? {
+        useManualGender ? manualGender : appleGender
     }
 
-    func saveFormulaOverrides(birthDate: Date, sex: FormulaSex) throws {
+    func saveFormulaOverrides(birthDate: Date, gender: FormulaGender) throws {
         let age = Calendar.current.dateComponents([.year], from: birthDate, to: Date()).year ?? 0
         guard (18...120).contains(age), birthDate <= Date() else { throw HeightError.invalidBirthDate }
-        let saved = FormulaOverrides(birthDate: birthDate, sex: sex,
-                                     useManualBirthDate: true, useManualSex: true)
+        let saved = FormulaOverrides(birthDate: birthDate, gender: gender,
+                                     useManualBirthDate: true, useManualGender: true)
         try JSONEncoder().encode(saved).write(to: overridesURL, options: [.atomic, .completeFileProtection])
         manualBirthDate = birthDate
-        manualSex = sex
+        manualGender = gender
         useManualBirthDate = true
-        useManualSex = true
+        useManualGender = true
     }
 
     func useAppleDemographics() throws {
-        let saved = FormulaOverrides(birthDate: manualBirthDate, sex: manualSex,
-                                     useManualBirthDate: false, useManualSex: false)
+        let saved = FormulaOverrides(birthDate: manualBirthDate, gender: manualGender,
+                                     useManualBirthDate: false, useManualGender: false)
         try JSONEncoder().encode(saved).write(to: overridesURL, options: [.atomic, .completeFileProtection])
         useManualBirthDate = false
-        useManualSex = false
+        useManualGender = false
     }
 
     private enum HeightError: LocalizedError {

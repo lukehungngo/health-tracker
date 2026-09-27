@@ -7,6 +7,7 @@ struct AddMealView: View {
     @EnvironmentObject private var mealEstimates: MealEstimateStore
     @EnvironmentObject private var weights: WeightStore
     @EnvironmentObject private var leanMass: LeanMassStore
+    @EnvironmentObject private var energy: EnergyStore
     @EnvironmentObject private var profile: ProfileStore
     @EnvironmentObject private var auth: AuthStore
     @EnvironmentObject private var sync: CloudSync
@@ -99,7 +100,7 @@ struct AddMealView: View {
             note = ""
             message = "Meal saved on this phone."
             if let userID = auth.userID {
-                Task { await sync.run(userID: userID, meals: meals, weights: weights, leanMass: leanMass, profile: profile, mealEstimates: mealEstimates) }
+                Task { await sync.run(userID: userID, meals: meals, weights: weights, leanMass: leanMass, energy: energy, profile: profile, mealEstimates: mealEstimates) }
             }
         } catch {
             message = "Meal could not be saved: \(error.localizedDescription)"

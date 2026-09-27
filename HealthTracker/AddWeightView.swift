@@ -4,6 +4,7 @@ struct AddWeightView: View {
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var weights: WeightStore
     @EnvironmentObject private var leanMass: LeanMassStore
+    @EnvironmentObject private var energy: EnergyStore
     @EnvironmentObject private var profile: ProfileStore
     @EnvironmentObject private var meals: MealStore
     @EnvironmentObject private var mealEstimates: MealEstimateStore
@@ -41,7 +42,7 @@ struct AddWeightView: View {
                     }
                 }
             }
-            .navigationTitle("Log weight")
+            .navigationTitle("Log new weight")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -52,6 +53,7 @@ struct AddWeightView: View {
                         .disabled(kilograms == nil)
                 }
             }
+            .onAppear { weightText = weights.entries.first.map { String($0.kilograms) } ?? "" }
         }
     }
 
@@ -61,7 +63,7 @@ struct AddWeightView: View {
             try weights.save(kilograms: kilograms, measuredAt: measuredAt)
             dismiss()
             if let userID = auth.userID {
-                Task { await sync.run(userID: userID, meals: meals, weights: weights, leanMass: leanMass, profile: profile, mealEstimates: mealEstimates) }
+                Task { await sync.refreshValues(userID: userID, weights: weights, leanMass: leanMass, energy: energy) }
             }
         } catch {
             errorMessage = error.localizedDescription

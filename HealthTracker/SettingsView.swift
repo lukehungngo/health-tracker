@@ -6,6 +6,7 @@ struct SettingsView: View {
     @EnvironmentObject private var mealEstimates: MealEstimateStore
     @EnvironmentObject private var weights: WeightStore
     @EnvironmentObject private var leanMass: LeanMassStore
+    @EnvironmentObject private var energy: EnergyStore
     @EnvironmentObject private var profile: ProfileStore
     @EnvironmentObject private var auth: AuthStore
     @EnvironmentObject private var sync: CloudSync
@@ -14,7 +15,7 @@ struct SettingsView: View {
     @State private var password = ""
     @State private var heightText = ""
     @State private var birthDateOverride = Calendar.current.date(byAdding: .year, value: -30, to: Date()) ?? Date()
-    @State private var sexOverride: FormulaSex?
+    @State private var genderOverride: FormulaGender?
     @State private var manualDemographics = false
     @State private var heightMessage: String?
     @State private var demographicsMessage: String?
@@ -30,7 +31,7 @@ struct SettingsView: View {
                             await health.refresh()
                             if let userID = auth.userID {
                                 await sync.run(userID: userID, meals: meals, weights: weights,
-                                               leanMass: leanMass, profile: profile, mealEstimates: mealEstimates)
+                                               leanMass: leanMass, energy: energy, profile: profile, mealEstimates: mealEstimates)
                             }
                         }
                     } label: {
@@ -45,7 +46,20 @@ struct SettingsView: View {
                         Label("Refresh meals only", systemImage: "fork.knife")
                     }
                     .disabled(sync.isRefreshingMeals)
+                    Button {
+                        if let userID = auth.userID {
+                            Task {
+                                await sync.refreshValues(userID: userID, weights: weights,
+                                                         leanMass: leanMass, energy: energy)
+                            }
+                        }
+                    } label: {
+                        Label("Refresh body values", systemImage: "arrow.down.circle")
+                    }
+                    .disabled(sync.isRefreshingValues)
                     LabeledContent("Last meal refresh", value: sync.lastMealSync?
+                        .formatted(date: .abbreviated, time: .shortened) ?? "Not yet")
+                    LabeledContent("Last body values refresh", value: sync.lastValueSync?
                         .formatted(date: .abbreviated, time: .shortened) ?? "Not yet")
                     LabeledContent("Last Health upload", value: sync.lastSuccess?
                         .formatted(date: .abbreviated, time: .shortened) ?? "Not yet completed")
@@ -70,6 +84,7 @@ struct SettingsView: View {
                 }
                 if let message = auth.message { Text(message).foregroundStyle(.secondary) }
                 if let message = sync.mealMessage { Text(message).foregroundStyle(.secondary) }
+                if let message = sync.valueMessage { Text(message).foregroundStyle(.secondary) }
                 if let message = sync.message { Text(message).foregroundStyle(.secondary) }
             } header: {
                 Text("Account & sync")
@@ -128,7 +143,7 @@ struct SettingsView: View {
             Section {
                 LabeledContent("Apple Health birth date", value: health.today.appleBirthDate?
                     .formatted(date: .abbreviated, time: .omitted) ?? "No value")
-                LabeledContent("Apple Health sex", value: health.today.appleSex?.rawValue ?? "No value")
+                LabeledContent("Apple Health gender", value: health.today.appleGender?.rawValue ?? "No value")
                 Picker("Profile source", selection: $manualDemographics) {
                     Text("Apple Health").tag(false)
                     Text("Enter here").tag(true)
@@ -137,15 +152,15 @@ struct SettingsView: View {
                 if manualDemographics {
                     DatePicker("Birth date", selection: $birthDateOverride,
                                in: ...Date(), displayedComponents: .date)
-                    Picker("Sex for formula", selection: $sexOverride) {
-                        Text("Choose").tag(nil as FormulaSex?)
-                        ForEach(FormulaSex.allCases) { sex in
-                            Text(sex.rawValue).tag(Optional(sex))
+                    Picker("Gender for formula", selection: $genderOverride) {
+                        Text("Choose").tag(nil as FormulaGender?)
+                        ForEach(FormulaGender.allCases) { gender in
+                            Text(gender.rawValue).tag(Optional(gender))
                         }
                     }
                     Button("Save manual profile") { saveFormulaOverrides() }
-                        .disabled(sexOverride == nil)
-                    if !profile.useManualBirthDate && !profile.useManualSex {
+                        .disabled(genderOverride == nil)
+                    if !profile.useManualBirthDate && !profile.useManualGender {
                         Text("Manual values take effect only after Save.")
                             .foregroundStyle(.secondary)
                     }
@@ -153,9 +168,9 @@ struct SettingsView: View {
                 LabeledContent("Profile used", value: activeDemographics)
                 if let demographicsMessage { Text(demographicsMessage).foregroundStyle(.secondary) }
             } header: {
-                Text("Age & sex for calorie formula")
+                Text("Age & gender for calorie formula")
             } footer: {
-                Text("The app reads Apple Health unless you save a manual override. Changing the source back to Apple Health does not delete saved manual values.")
+                Text("Gender here selects the calorie formula's male/female coefficient; it is not a statement about your identity. The app reads Apple Health unless you save a manual override. Switching back does not delete it.")
             }
         }
         .navigationTitle("Settings")
@@ -163,14 +178,14 @@ struct SettingsView: View {
             heightText = profile.manualHeight.map { String($0.centimeters) } ?? ""
             birthDateOverride = profile.manualBirthDate ?? health.today.appleBirthDate
                 ?? (Calendar.current.date(byAdding: .year, value: -30, to: Date()) ?? Date())
-            sexOverride = profile.manualSex ?? health.today.appleSex
-            manualDemographics = profile.useManualBirthDate || profile.useManualSex
+            genderOverride = profile.manualGender ?? health.today.appleGender
+            manualDemographics = profile.useManualBirthDate || profile.useManualGender
         }
         .onChange(of: manualDemographics) { _, manual in
             guard !manual else { return }
             do {
                 try profile.useAppleDemographics()
-                demographicsMessage = "Using Apple Health birth date and sex when available."
+                demographicsMessage = "Using Apple Health birth date and gender when available."
             } catch {
                 demographicsMessage = error.localizedDescription
             }
@@ -179,10 +194,10 @@ struct SettingsView: View {
 
     private var activeDemographics: String {
         let date = profile.selectedBirthDate(appleBirthDate: health.today.appleBirthDate)
-        let sex = profile.selectedSex(appleSex: health.today.appleSex)
-        guard let date, let sex else { return "Missing" }
-        let source = profile.useManualBirthDate || profile.useManualSex ? "manual" : "Apple Health"
-        return "\(date.formatted(date: .abbreviated, time: .omitted)), \(sex.rawValue) (\(source))"
+        let gender = profile.selectedGender(appleGender: health.today.appleGender)
+        guard let date, let gender else { return "Missing" }
+        let source = profile.useManualBirthDate || profile.useManualGender ? "manual" : "Apple Health"
+        return "\(date.formatted(date: .abbreviated, time: .omitted)), \(gender.rawValue) (\(source))"
     }
 
     private var parsedHeight: Double? {
@@ -203,10 +218,10 @@ struct SettingsView: View {
     }
 
     private func saveFormulaOverrides() {
-        guard let sex = sexOverride else { return }
+        guard let gender = genderOverride else { return }
         do {
-            try profile.saveFormulaOverrides(birthDate: birthDateOverride, sex: sex)
-            demographicsMessage = "Manual birth date and sex are now used for the formula."
+            try profile.saveFormulaOverrides(birthDate: birthDateOverride, gender: gender)
+            demographicsMessage = "Manual birth date and gender are now used for the formula."
         } catch {
             demographicsMessage = error.localizedDescription
         }
@@ -217,7 +232,7 @@ struct SettingsView: View {
         if let userID = auth.userID {
             password = ""
             await sync.run(userID: userID, meals: meals, weights: weights,
-                           leanMass: leanMass, profile: profile, mealEstimates: mealEstimates)
+                           leanMass: leanMass, energy: energy, profile: profile, mealEstimates: mealEstimates)
         }
     }
 
@@ -226,7 +241,7 @@ struct SettingsView: View {
         if let userID = auth.userID {
             password = ""
             await sync.run(userID: userID, meals: meals, weights: weights,
-                           leanMass: leanMass, profile: profile, mealEstimates: mealEstimates)
+                           leanMass: leanMass, energy: energy, profile: profile, mealEstimates: mealEstimates)
         }
     }
 }

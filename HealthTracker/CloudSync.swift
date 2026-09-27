@@ -50,6 +50,15 @@ private struct ManualMassDownload: Decodable {
     let external_id: UUID
     let start_at: Date
     let value: Double
+    let source: String?
+}
+
+private struct EnergyDownload: Decodable {
+    let external_id: UUID
+    let type: String
+    let start_at: Date
+    let value: Double
+    let source: String?
 }
 
 private struct HeightDownload: Decodable {
@@ -62,16 +71,19 @@ private struct HeightDownload: Decodable {
 final class CloudSync: ObservableObject {
     @Published private(set) var isSyncing = false
     @Published private(set) var isRefreshingMeals = false
+    @Published private(set) var isRefreshingValues = false
     @Published private(set) var lastSuccess: Date?
     @Published private(set) var lastMealSync: Date?
+    @Published private(set) var lastValueSync: Date?
     @Published var message: String?
     @Published var mealMessage: String?
+    @Published var valueMessage: String?
 
     private let client = SupabaseConnection.client
     private let health = HKHealthStore()
     private let batchLimit = 250
 
-    func run(userID: UUID, meals: MealStore, weights: WeightStore, leanMass: LeanMassStore, profile: ProfileStore,
+    func run(userID: UUID, meals: MealStore, weights: WeightStore, leanMass: LeanMassStore, energy: EnergyStore, profile: ProfileStore,
              mealEstimates: MealEstimateStore) async {
         guard !isSyncing else { return }
         let lastSuccessKey = "last-cloud-sync.\(userID.uuidString)"
@@ -85,6 +97,8 @@ final class CloudSync: ObservableObject {
         do {
             try await syncWeights(userID: userID, weights: weights)
             try await syncLeanMass(userID: userID, leanMass: leanMass)
+            try await syncEnergy(userID: userID, energy: energy)
+            lastValueSync = Date()
             try await syncHeight(userID: userID, profile: profile)
             try await syncHealth(userID: userID)
             lastSuccess = Date()
@@ -92,6 +106,23 @@ final class CloudSync: ObservableObject {
             message = "Health data synced."
         } catch {
             message = "Health sync stopped: \(error.localizedDescription). Tap Sync Now to retry."
+        }
+    }
+
+    func refreshValues(userID: UUID, weights: WeightStore, leanMass: LeanMassStore,
+                       energy: EnergyStore) async {
+        guard !isRefreshingValues else { return }
+        isRefreshingValues = true
+        valueMessage = "Refreshing body values…"
+        defer { isRefreshingValues = false }
+        do {
+            try await syncWeights(userID: userID, weights: weights)
+            try await syncLeanMass(userID: userID, leanMass: leanMass)
+            try await syncEnergy(userID: userID, energy: energy)
+            lastValueSync = Date()
+            valueMessage = nil
+        } catch {
+            valueMessage = "Body values could not sync: \(error.localizedDescription). Tap Refresh values to retry."
         }
     }
 
@@ -306,15 +337,17 @@ final class CloudSync: ObservableObject {
 
     private func syncWeights(userID: UUID, weights: WeightStore) async throws {
         let remote: [ManualMassDownload] = try await client.from("health_samples")
-            .select("external_id,start_at,value")
+            .select("external_id,start_at,value,source")
             .eq("user_id", value: userID.uuidString)
             .eq("type", value: "app_weight")
             .execute()
             .value
         try weights.merge(remote.map {
-            WeightEntry(id: $0.external_id, measuredAt: $0.start_at, kilograms: $0.value)
+            WeightEntry(id: $0.external_id, measuredAt: $0.start_at, kilograms: $0.value,
+                        source: $0.source ?? "Cloud", pendingUpload: false)
         })
-        let rows = weights.entries.map { entry in
+        let pending = weights.pendingEntries
+        let rows = pending.map { entry in
             HealthSampleUpload(
                 user_id: userID,
                 external_id: entry.id,
@@ -323,26 +356,29 @@ final class CloudSync: ObservableObject {
                 end_at: entry.measuredAt,
                 value: entry.kilograms,
                 unit: "kg",
-                source: "Health Tracker (manual)"
+                source: entry.source
             )
         }
         guard !rows.isEmpty else { return }
         try await client.from("health_samples")
             .upsert(rows, onConflict: "user_id,external_id")
             .execute()
+        try weights.markUploaded(Set(pending.map(\.id)))
     }
 
     private func syncLeanMass(userID: UUID, leanMass: LeanMassStore) async throws {
         let remote: [ManualMassDownload] = try await client.from("health_samples")
-            .select("external_id,start_at,value")
+            .select("external_id,start_at,value,source")
             .eq("user_id", value: userID.uuidString)
             .eq("type", value: "app_lean_mass")
             .execute()
             .value
         try leanMass.merge(remote.map {
-            LeanMassEntry(id: $0.external_id, measuredAt: $0.start_at, kilograms: $0.value)
+            LeanMassEntry(id: $0.external_id, measuredAt: $0.start_at, kilograms: $0.value,
+                          source: $0.source ?? "Cloud", pendingUpload: false)
         })
-        let rows = leanMass.entries.map { entry in
+        let pending = leanMass.pendingEntries
+        let rows = pending.map { entry in
             HealthSampleUpload(
                 user_id: userID,
                 external_id: entry.id,
@@ -351,13 +387,44 @@ final class CloudSync: ObservableObject {
                 end_at: entry.measuredAt,
                 value: entry.kilograms,
                 unit: "kg",
-                source: "Health Tracker (manual)"
+                source: entry.source
             )
         }
         guard !rows.isEmpty else { return }
         try await client.from("health_samples")
             .upsert(rows, onConflict: "user_id,external_id")
             .execute()
+        try leanMass.markUploaded(Set(pending.map(\.id)))
+    }
+
+    private func syncEnergy(userID: UUID, energy: EnergyStore) async throws {
+        var remote: [EnergyEntry] = []
+        for kind in EnergyKind.allCases {
+            let rows: [EnergyDownload] = try await client.from("health_samples")
+                .select("external_id,type,start_at,value,source")
+                .eq("user_id", value: userID.uuidString)
+                .eq("type", value: kind.rawValue)
+                .execute()
+                .value
+            remote += rows.compactMap { row in
+                guard let kind = EnergyKind(rawValue: row.type) else { return nil }
+                return EnergyEntry(id: row.external_id, kind: kind, recordedAt: row.start_at,
+                                   kilocalories: row.value, source: row.source ?? "Cloud",
+                                   pendingUpload: false)
+            }
+        }
+        try energy.merge(remote)
+        let pending = energy.pendingEntries
+        guard !pending.isEmpty else { return }
+        let rows = pending.map { entry in
+            HealthSampleUpload(user_id: userID, external_id: entry.id, type: entry.kind.rawValue,
+                               start_at: entry.recordedAt, end_at: entry.recordedAt,
+                               value: entry.kilocalories, unit: "kcal/day", source: entry.source)
+        }
+        try await client.from("health_samples")
+            .upsert(rows, onConflict: "user_id,external_id")
+            .execute()
+        try energy.markUploaded(Set(pending.map(\.id)))
     }
 
     private func syncHeight(userID: UUID, profile: ProfileStore) async throws {

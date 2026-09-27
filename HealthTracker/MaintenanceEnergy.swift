@@ -9,19 +9,19 @@ enum MaintenanceEnergy {
     // Cunningham uses fat-free mass, not skeletal muscle mass. Both formulas
     // estimate resting energy, then apply the same mostly seated activity factor.
     static func dailyEstimate(leanMassKg: Double?, weightKg: Double?, heightCm: Double?,
-                              birthDate: Date?, sex: FormulaSex?) -> MaintenanceEstimate? {
+                              birthDate: Date?, gender: FormulaGender?) -> MaintenanceEstimate? {
         if let leanMassKg, leanMassKg.isFinite, (10...200).contains(leanMassKg),
            weightKg.map({ leanMassKg <= $0 }) ?? true {
             return MaintenanceEstimate(kilocalories: (500 + 22 * leanMassKg) * 1.2,
                                        formula: "Cunningham (lean mass) × 1.2")
         }
-        guard let weightKg, let heightCm, let birthDate, let sex,
+        guard let weightKg, let heightCm, let birthDate, let gender,
               weightKg.isFinite, heightCm.isFinite,
               (20...500).contains(weightKg), (100...250).contains(heightCm),
               let age = Calendar.current.dateComponents([.year], from: birthDate, to: Date()).year,
               (18...120).contains(age) else { return nil }
         let resting = 10 * weightKg + 6.25 * heightCm - 5 * Double(age)
-            + (sex == .male ? 5 : -161)
+            + (gender == .male ? 5 : -161)
         return MaintenanceEstimate(kilocalories: resting * 1.2,
                                    formula: "Mifflin-St Jeor × 1.2")
     }

@@ -1,27 +1,25 @@
 import SwiftUI
 
-struct AddLeanMassView: View {
+struct AddEnergyView: View {
+    let kind: EnergyKind
+
     @Environment(\.dismiss) private var dismiss
-    @EnvironmentObject private var leanMass: LeanMassStore
     @EnvironmentObject private var energy: EnergyStore
     @EnvironmentObject private var weights: WeightStore
-    @EnvironmentObject private var meals: MealStore
-    @EnvironmentObject private var mealEstimates: MealEstimateStore
-    @EnvironmentObject private var profile: ProfileStore
+    @EnvironmentObject private var leanMass: LeanMassStore
     @EnvironmentObject private var auth: AuthStore
     @EnvironmentObject private var sync: CloudSync
 
     @State private var valueText = ""
-    @State private var measuredAt = Date()
+    @State private var recordedAt = Date()
     @State private var errorMessage: String?
 
-    private var kilograms: Double? {
+    private var kilocalories: Double? {
         let input = valueText.trimmingCharacters(in: .whitespacesAndNewlines)
             .replacingOccurrences(of: ",", with: ".")
         guard !input.isEmpty, input.filter({ $0 == "." }).count <= 1,
               input.allSatisfy({ $0.isNumber || $0 == "." }),
-              let value = Double(input), (10...200).contains(value),
-              weights.entries.first.map({ value <= $0.kilograms }) ?? true else { return nil }
+              let value = Double(input), (400...10_000).contains(value) else { return nil }
         return value
     }
 
@@ -29,33 +27,37 @@ struct AddLeanMassView: View {
         NavigationStack {
             Form {
                 Section {
-                    TextField("Lean body mass (kg)", text: $valueText)
+                    TextField("Energy (kcal/day)", text: $valueText)
                         .keyboardType(.decimalPad)
-                    DatePicker("Measured at", selection: $measuredAt, in: ...Date())
+                        .accessibilityHint("Enter an estimated daily energy amount in kilocalories")
+                    DatePicker("Recorded at", selection: $recordedAt, in: ...Date())
                 } footer: {
-                    Text("Enter fat-free/lean body mass from your scale or body-composition report, not skeletal muscle mass. It must not exceed your body weight. Height stays in Settings.")
+                    Text(kind == .basal
+                         ? "This is a daily basal estimate. It does not change Apple Health's measured basal energy."
+                         : "This is your estimated daily intake to maintain weight, not a weight-loss target. A newer entry replaces it on Today.")
                 }
                 if let errorMessage {
                     Section { Text(errorMessage).foregroundStyle(.red) }
                 }
             }
-            .navigationTitle("Log new lean mass")
+            .navigationTitle(kind.title)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Save") { save() }.disabled(kilograms == nil)
+                    Button("Save") { save() }.disabled(kilocalories == nil)
                 }
             }
-            .onAppear { valueText = leanMass.entries.first.map { String($0.kilograms) } ?? "" }
+            .onAppear {
+                valueText = energy.latest(for: kind).map { String($0.kilocalories) } ?? ""
+            }
         }
     }
 
     private func save() {
-        guard let kilograms else { return }
+        guard let kilocalories else { return }
         do {
-            try leanMass.save(kilograms: kilograms, measuredAt: measuredAt,
-                              latestWeightKg: weights.entries.first?.kilograms)
+            try energy.save(kind: kind, kilocalories: kilocalories, recordedAt: recordedAt)
             dismiss()
             if let userID = auth.userID {
                 Task {
