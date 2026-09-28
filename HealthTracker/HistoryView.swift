@@ -32,6 +32,7 @@ struct HistoryView: View {
     @State private var isLoading = false
     @State private var errorMessage: String?
     @State private var activeLoadID: UUID?
+    @State private var selectedMeal: Meal?
 
     private var dayMeals: [Meal] {
         meals.meals.filter { Calendar.current.isDate($0.eatenAt, inSameDayAs: selectedDate) }
@@ -170,7 +171,10 @@ struct HistoryView: View {
                             .foregroundStyle(.secondary)
                     }
                     ForEach(dayMeals) { meal in
-                        HStack(spacing: 12) {
+                        Button {
+                            selectedMeal = meal
+                        } label: {
+                          HStack(spacing: 12) {
                             if let image = meals.image(for: meal) {
                                 Image(uiImage: image)
                                     .resizable()
@@ -185,12 +189,16 @@ struct HistoryView: View {
                                 Text(meal.note.isEmpty ? "Photo only" : meal.note)
                                     .lineLimit(2)
                                 if let estimate = mealEstimates.estimate(for: meal.id) {
-                                    Text("~\(Int(estimate.calories_kcal)) kcal\(estimate.protein_g.map { " · ~\($0.formatted(.number.precision(.fractionLength(0...1)))) g protein" } ?? "") · estimate")
+                                    Text("\(estimate.calories_kcal.map { "~\(Int($0)) kcal" } ?? "Kcal not entered")\(estimate.protein_g.map { " · ~\($0.formatted(.number.precision(.fractionLength(0...1)))) g protein" } ?? "") · estimate")
                                         .font(.caption)
                                         .foregroundStyle(.secondary)
                                 }
                             }
+                          }
                         }
+                        .buttonStyle(.plain)
+                        .frame(minHeight: 44)
+                        .accessibilityLabel("View meal log: \(meal.note.isEmpty ? "Photo only" : meal.note)")
                     }
                 }
             }
@@ -215,6 +223,9 @@ struct HistoryView: View {
             }
         }
         .navigationTitle("History")
+        .sheet(item: $selectedMeal) { meal in
+            MealDetailView(mealID: meal.id)
+        }
         .task(id: Calendar.current.startOfDay(for: selectedDate)) { await load() }
     }
 

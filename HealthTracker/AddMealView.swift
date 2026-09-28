@@ -5,10 +5,6 @@ import UIKit
 struct AddMealView: View {
     @EnvironmentObject private var meals: MealStore
     @EnvironmentObject private var mealEstimates: MealEstimateStore
-    @EnvironmentObject private var weights: WeightStore
-    @EnvironmentObject private var leanMass: LeanMassStore
-    @EnvironmentObject private var energy: EnergyStore
-    @EnvironmentObject private var profile: ProfileStore
     @EnvironmentObject private var auth: AuthStore
     @EnvironmentObject private var sync: CloudSync
     @State private var selectedPhoto: PhotosPickerItem?
@@ -17,10 +13,11 @@ struct AddMealView: View {
     @State private var showCamera = false
     @State private var isLoadingPhoto = false
     @State private var message: String?
+    @FocusState private var noteFocused: Bool
 
     var body: some View {
         Form {
-            Section("Meal photo") {
+            Section("Photo (optional)") {
                 if let image {
                     Image(uiImage: image)
                         .resizable()
@@ -49,12 +46,13 @@ struct AddMealView: View {
                 TextField("For example, rice and fish", text: $note, axis: .vertical)
                     .lineLimit(2...5)
                     .accessibilityLabel("Meal note")
+                    .focused($noteFocused)
             }
 
             Section {
                 Button("Save Meal") { saveMeal() }
                     .frame(maxWidth: .infinity, minHeight: 44)
-                    .disabled(image == nil || isLoadingPhoto)
+                    .disabled((image == nil && note.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty) || isLoadingPhoto)
             } footer: {
                 Text(auth.userID == nil ? "Saved on this phone. Sign in under Settings to sync." : "Saved on this phone first, then uploaded to Supabase.")
             }
@@ -67,6 +65,14 @@ struct AddMealView: View {
             }
         }
         .navigationTitle("Add Meal")
+        .scrollDismissesKeyboard(.interactively)
+        .onAppear { message = nil }
+        .toolbar {
+            ToolbarItemGroup(placement: .keyboard) {
+                Spacer()
+                Button("Done") { noteFocused = false }
+            }
+        }
         .sheet(isPresented: $showCamera) {
             CameraPicker { image = $0 }
                 .ignoresSafeArea()
@@ -92,15 +98,15 @@ struct AddMealView: View {
     }
 
     private func saveMeal() {
-        guard let image else { return }
         do {
             try meals.save(image: image, note: note)
+            noteFocused = false
             self.image = nil
             selectedPhoto = nil
             note = ""
             message = "Meal saved on this phone."
             if let userID = auth.userID {
-                Task { await sync.run(userID: userID, meals: meals, weights: weights, leanMass: leanMass, energy: energy, profile: profile, mealEstimates: mealEstimates) }
+                Task { await sync.refreshMeals(userID: userID, meals: meals, mealEstimates: mealEstimates) }
             }
         } catch {
             message = "Meal could not be saved: \(error.localizedDescription)"

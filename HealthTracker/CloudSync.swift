@@ -36,7 +36,37 @@ private struct MealUpload: Encodable {
     let user_id: UUID
     let eaten_at: Date
     let note: String
-    let image_path: String
+    let image_path: String?
+}
+
+private struct ManualMealEstimateUpload: Encodable {
+    let id: UUID
+    let user_id: UUID
+    let meal_id: UUID
+    let calories_kcal: Double?
+    let protein_g: Double?
+    let carbs_g: Double?
+    let fat_g: Double?
+    let confidence: Double? = nil
+    let estimation_metadata = ["source": "manual"]
+
+    private enum CodingKeys: String, CodingKey {
+        case id, user_id, meal_id, calories_kcal, protein_g, carbs_g, fat_g,
+             confidence, estimation_metadata
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var values = encoder.container(keyedBy: CodingKeys.self)
+        try values.encode(id, forKey: .id)
+        try values.encode(user_id, forKey: .user_id)
+        try values.encode(meal_id, forKey: .meal_id)
+        try values.encode(calories_kcal, forKey: .calories_kcal)
+        try values.encode(protein_g, forKey: .protein_g)
+        try values.encode(carbs_g, forKey: .carbs_g)
+        try values.encode(fat_g, forKey: .fat_g)
+        try values.encodeNil(forKey: .confidence)
+        try values.encode(estimation_metadata, forKey: .estimation_metadata)
+    }
 }
 
 private struct MealDownload: Decodable {
@@ -82,6 +112,7 @@ final class CloudSync: ObservableObject {
     private let client = SupabaseConnection.client
     private let health = HKHealthStore()
     private let batchLimit = 250
+    private var mealRefreshQueued = false
 
     func run(userID: UUID, meals: MealStore, weights: WeightStore, leanMass: LeanMassStore, energy: EnergyStore, profile: ProfileStore,
              mealEstimates: MealEstimateStore) async {
@@ -127,15 +158,24 @@ final class CloudSync: ObservableObject {
     }
 
     func refreshMeals(userID: UUID, meals: MealStore, mealEstimates: MealEstimateStore) async {
-        guard !isRefreshingMeals else { return }
+        guard !isRefreshingMeals else {
+            mealRefreshQueued = true
+            return
+        }
         let key = "last-meal-sync.\(userID.uuidString)"
         lastMealSync = UserDefaults.standard.object(forKey: key) as? Date
         isRefreshingMeals = true
         mealMessage = "Refreshing meals…"
-        defer { isRefreshingMeals = false }
+        defer {
+            isRefreshingMeals = false
+            if mealRefreshQueued {
+                mealRefreshQueued = false
+                Task { await refreshMeals(userID: userID, meals: meals, mealEstimates: mealEstimates) }
+            }
+        }
         do {
             try await syncMeals(userID: userID, meals: meals)
-            try await pullMealEstimates(userID: userID, into: mealEstimates)
+            try await syncMealEstimates(userID: userID, into: mealEstimates)
             lastMealSync = Date()
             UserDefaults.standard.set(lastMealSync, forKey: key)
             mealMessage = nil
@@ -309,7 +349,7 @@ final class CloudSync: ObservableObject {
         for meal in remote {
             var imageData: Data?
             if let path = meal.image_path, !path.isEmpty {
-                guard path.hasPrefix("\(userID.uuidString)/") else {
+                guard path.hasPrefix("\(userID.uuidString.lowercased())/") else {
                     throw SyncError.invalidMealPath
                 }
                 if meals.needsRemoteImage(id: meal.id, path: path) {
@@ -320,18 +360,19 @@ final class CloudSync: ObservableObject {
                                    imageData: imageData, imagePath: meal.image_path)
         }
         let remoteIDs = Set(remote.map(\.id))
-        for meal in meals.meals where !remoteIDs.contains(meal.id) {
-            guard let data = meals.imageData(for: meal) else {
-                throw SyncError.missingMealImage
+        for meal in meals.meals where !remoteIDs.contains(meal.id) || meal.pendingUpload {
+            var path = meal.remoteImagePath
+            if let imageName = meal.imageName, path == nil {
+                guard let data = meals.imageData(for: meal) else { throw SyncError.missingMealImage }
+                path = "\(userID.uuidString.lowercased())/\(imageName)"
+                try await client.storage.from("meal-images")
+                    .upload(path!, data: data,
+                            options: FileOptions(contentType: "image/jpeg", upsert: true))
             }
-            guard let imageName = meal.imageName else { throw SyncError.missingMealImage }
-            let path = "\(userID.uuidString)/\(imageName)"
-            try await client.storage.from("meal-images")
-                .upload(path, data: data,
-                        options: FileOptions(contentType: "image/jpeg", upsert: true))
             let row = MealUpload(id: meal.id, user_id: userID, eaten_at: meal.eatenAt,
                                  note: meal.note, image_path: path)
-            try await client.from("meals").upsert(row).execute()
+            try await client.from("meals").upsert(row, onConflict: "id").execute()
+            try meals.markUploaded(meal, remoteImagePath: path)
         }
     }
 
@@ -455,13 +496,32 @@ final class CloudSync: ObservableObject {
             .execute()
     }
 
-    private func pullMealEstimates(userID: UUID, into store: MealEstimateStore) async throws {
+    private func syncMealEstimates(userID: UUID, into store: MealEstimateStore) async throws {
         let remote: [MealEstimate] = try await client.from("meal_estimates")
             .select("id,meal_id,calories_kcal,protein_g,carbs_g,fat_g,confidence")
             .eq("user_id", value: userID.uuidString)
             .execute()
             .value
         try store.replaceFromCloud(remote)
+        let remoteByMeal = Dictionary(uniqueKeysWithValues: remote.map { ($0.meal_id, $0) })
+        for estimate in store.pendingEstimates {
+            let remoteID = remoteByMeal[estimate.meal_id]?.id ?? estimate.id
+            let row = ManualMealEstimateUpload(id: remoteID, user_id: userID,
+                                               meal_id: estimate.meal_id,
+                                               calories_kcal: estimate.calories_kcal,
+                                               protein_g: estimate.protein_g,
+                                               carbs_g: estimate.carbs_g, fat_g: estimate.fat_g)
+            if remoteByMeal[estimate.meal_id] != nil {
+                try await client.from("meal_estimates")
+                    .update(row)
+                    .eq("id", value: remoteID.uuidString)
+                    .eq("user_id", value: userID.uuidString)
+                    .execute()
+            } else {
+                try await client.from("meal_estimates").insert(row).execute()
+            }
+            try store.markUploaded(estimate, remoteID: remoteID)
+        }
     }
 
     private enum SyncError: LocalizedError {

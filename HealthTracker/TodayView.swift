@@ -16,6 +16,7 @@ struct TodayView: View {
     @State private var showingLeanMassEntry = false
     @State private var editingEnergy: EnergyKind?
     @State private var showingProteinTarget = false
+    @State private var selectedMeal: Meal?
 
     var body: some View {
         ScrollView {
@@ -155,7 +156,7 @@ struct TodayView: View {
                         .font(.headline)
                     let todayMeals = meals.meals.filter { Calendar.current.isDateInToday($0.eatenAt) }
                     if todayMeals.isEmpty {
-                        Text("No meals yet. Use Add Meal to save a photo and optional note.")
+                        Text("No meals yet. Use Add Meal to save a note, photo, or both.")
                             .foregroundStyle(.secondary)
                     } else {
                         Text("Estimated eaten so far: \(Int(mealEstimates.totalCalories(for: todayMeals))) kcal · \(mealEstimates.totalProtein(for: todayMeals).formatted(.number.precision(.fractionLength(0...1)))) g protein")
@@ -173,7 +174,10 @@ struct TodayView: View {
                                 .foregroundStyle(.secondary)
                         }
                         ForEach(todayMeals) { meal in
-                            HStack(spacing: 12) {
+                            Button {
+                                selectedMeal = meal
+                            } label: {
+                              HStack(spacing: 12) {
                                 if let image = meals.image(for: meal) {
                                     Image(uiImage: image)
                                         .resizable()
@@ -188,7 +192,7 @@ struct TodayView: View {
                                     Text(meal.note.isEmpty ? "Photo only" : meal.note)
                                         .lineLimit(2)
                                     if let estimate = mealEstimates.estimate(for: meal.id) {
-                                        Text("~\(Int(estimate.calories_kcal)) kcal\(estimate.protein_g.map { " · ~\($0.formatted(.number.precision(.fractionLength(0...1)))) g protein" } ?? "") · estimate")
+                                        Text("\(estimate.calories_kcal.map { "~\(Int($0)) kcal" } ?? "Kcal not entered")\(estimate.protein_g.map { " · ~\($0.formatted(.number.precision(.fractionLength(0...1)))) g protein" } ?? "") · estimate")
                                             .font(.caption)
                                             .foregroundStyle(.secondary)
                                     } else {
@@ -198,7 +202,11 @@ struct TodayView: View {
                                     }
                                 }
                                 Spacer()
+                              }
                             }
+                            .buttonStyle(.plain)
+                            .frame(minHeight: 44)
+                            .accessibilityLabel("View meal log: \(meal.note.isEmpty ? "Photo only" : meal.note)")
                         }
                     }
                 }
@@ -248,6 +256,9 @@ struct TodayView: View {
             AddProteinTargetView()
                 .environmentObject(proteinTargets)
                 .environmentObject(auth)
+        }
+        .sheet(item: $selectedMeal) { meal in
+            MealDetailView(mealID: meal.id)
         }
     }
 
