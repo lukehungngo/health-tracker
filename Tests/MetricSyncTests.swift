@@ -4,6 +4,67 @@ import XCTest
 
 @MainActor
 final class MetricSyncTests: XCTestCase {
+    // A failed startup read must never turn an unread local file into an empty
+    // cache that a subsequent cloud merge/save can overwrite.
+    func testWeightMergeRetriesFailedLoadAndPreservesPendingLocalWeight() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let file = directory.appendingPathComponent("weights.json")
+        try Data("unreadable index".utf8).write(to: file)
+        let store = WeightStore(directory: directory)
+        XCTAssertNotNil(store.errorMessage)
+
+        let pending = WeightEntry(id: UUID(), measuredAt: Date(timeIntervalSince1970: 1_700_000_000),
+                                  kilograms: 77.7)
+        // Restore readable bytes, representing access becoming available again.
+        try JSONEncoder().encode([pending]).write(to: file)
+        let remote = WeightEntry(id: UUID(), measuredAt: Date(timeIntervalSince1970: 1_699_000_000),
+                                 kilograms: 78.4, pendingUpload: false)
+        try store.merge([remote])
+
+        XCTAssertEqual(Set(store.entries.map(\.id)), Set([pending.id, remote.id]))
+        XCTAssertEqual(store.pendingEntries, [pending])
+        XCTAssertNil(store.errorMessage)
+        XCTAssertEqual(WeightStore(directory: directory).entries, store.entries)
+    }
+
+    func testUnreadWeightIndexCannotBeOverwrittenByAnyMutation() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let file = directory.appendingPathComponent("weights.json")
+        let original = Data("unreadable index".utf8)
+        try original.write(to: file)
+        let store = WeightStore(directory: directory)
+        let date = Date(timeIntervalSince1970: 1_700_000_000)
+
+        XCTAssertThrowsError(try store.save(kilograms: 77, measuredAt: date))
+        XCTAssertThrowsError(try store.merge([]))
+        XCTAssertThrowsError(try store.markUploaded([UUID()]))
+        XCTAssertEqual(try Data(contentsOf: file), original)
+        XCTAssertNotNil(store.errorMessage)
+    }
+
+    func testWeightRecoveryWorksOfflineAndClearsStartupError() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let file = directory.appendingPathComponent("weights.json")
+        try Data("unreadable index".utf8).write(to: file)
+        let store = WeightStore(directory: directory)
+        let pending = WeightEntry(id: UUID(), measuredAt: Date(timeIntervalSince1970: 1_700_000_000),
+                                  kilograms: 77.7)
+        try JSONEncoder().encode([pending]).write(to: file)
+
+        try store.loadIfNeeded()
+        try store.loadIfNeeded()
+        XCTAssertEqual(store.entries, [pending])
+        XCTAssertNil(store.errorMessage)
+        try store.save(kilograms: 77.5, measuredAt: pending.measuredAt.addingTimeInterval(60))
+        XCTAssertEqual(WeightStore(directory: directory).entries.count, 2)
+    }
+
     func testLegacyFormulaProfileLoadsUnderGenderName() throws {
         let legacy = Data(#"{"sex":"Male","useManualSex":true,"useManualBirthDate":false}"#.utf8)
         let profile = try JSONDecoder().decode(FormulaOverrides.self, from: legacy)

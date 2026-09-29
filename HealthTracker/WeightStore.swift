@@ -37,19 +37,40 @@ final class WeightStore: ObservableObject {
     @Published var errorMessage: String?
 
     private let indexURL: URL
+    private var hasLoaded = false
 
     init(directory: URL? = nil) {
         let documents = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
         let directory = directory ?? documents.appendingPathComponent("Weights", isDirectory: true)
         indexURL = directory.appendingPathComponent("weights.json")
+        try? loadIfNeeded()
+    }
+
+    // Background launches can happen while complete-protection files are locked.
+    // Keep a failed read distinct from an empty store, and retry before any write.
+    func loadIfNeeded() throws {
+        guard !hasLoaded else { return }
         do {
-            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-            if FileManager.default.fileExists(atPath: indexURL.path) {
-                entries = try JSONDecoder().decode([WeightEntry].self, from: Data(contentsOf: indexURL))
-                    .sorted { $0.measuredAt > $1.measuredAt }
+            try FileManager.default.createDirectory(at: indexURL.deletingLastPathComponent(),
+                                                    withIntermediateDirectories: true)
+            let data: Data
+            do {
+                // fileExists can hide access failures; only an actual missing-file
+                // error establishes that this is a new, empty store.
+                data = try Data(contentsOf: indexURL)
+            } catch let error as CocoaError where error.code == .fileReadNoSuchFile {
+                entries = []
+                hasLoaded = true
+                errorMessage = nil
+                return
             }
+            entries = try JSONDecoder().decode([WeightEntry].self, from: data)
+                .sorted { $0.measuredAt > $1.measuredAt }
+            hasLoaded = true
+            errorMessage = nil
         } catch {
             errorMessage = "Saved weights could not be loaded: \(error.localizedDescription)"
+            throw error
         }
     }
 
@@ -57,6 +78,7 @@ final class WeightStore: ObservableObject {
         guard kilograms.isFinite, (20...500).contains(kilograms), measuredAt <= Date() else {
             throw WeightError.invalidEntry
         }
+        try loadIfNeeded()
         let entry = WeightEntry(id: UUID(), measuredAt: measuredAt, kilograms: kilograms)
         try persist(([entry] + entries).sorted { $0.measuredAt > $1.measuredAt })
     }
@@ -67,6 +89,7 @@ final class WeightStore: ObservableObject {
         guard remote.allSatisfy({ $0.kilograms.isFinite && (20...500).contains($0.kilograms) }) else {
             throw WeightError.invalidEntry
         }
+        try loadIfNeeded()
         let remoteIDs = Set(remote.map(\.id))
         let pending = entries.filter { $0.pendingUpload && !remoteIDs.contains($0.id) }
         let updated = (remote + pending).sorted { $0.measuredAt > $1.measuredAt }
@@ -74,6 +97,7 @@ final class WeightStore: ObservableObject {
     }
 
     func markUploaded(_ ids: Set<UUID>) throws {
+        try loadIfNeeded()
         let updated = entries.map { entry in
             guard ids.contains(entry.id) else { return entry }
             return WeightEntry(id: entry.id, measuredAt: entry.measuredAt,
@@ -86,6 +110,7 @@ final class WeightStore: ObservableObject {
     private func persist(_ updated: [WeightEntry]) throws {
         try JSONEncoder().encode(updated).write(to: indexURL, options: [.atomic, .completeFileProtection])
         entries = updated
+        errorMessage = nil
     }
 
     private enum WeightError: LocalizedError {
