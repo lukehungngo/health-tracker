@@ -1,6 +1,8 @@
 import SwiftUI
+import UIKit
 
 struct RootView: View {
+    @Environment(\.scenePhase) private var scenePhase
     @EnvironmentObject private var health: HealthStore
     @EnvironmentObject private var meals: MealStore
     @EnvironmentObject private var mealEstimates: MealEstimateStore
@@ -52,12 +54,19 @@ struct RootView: View {
         }
         .tint(.teal)
         .task {
+            try? weights.loadIfNeeded()
             await auth.restore()
             await health.refresh()
             if let userID = auth.userID {
                 await sync.run(userID: userID, meals: meals, weights: weights, leanMass: leanMass, energy: energy, profile: profile, mealEstimates: mealEstimates)
                 await dailyEnergy.loadMonth(.now, userID: userID, force: true)
             }
+        }
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active { try? weights.loadIfNeeded() }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIApplication.protectedDataDidBecomeAvailableNotification)) { _ in
+            try? weights.loadIfNeeded()
         }
         .onOpenURL { url in
             Task {
