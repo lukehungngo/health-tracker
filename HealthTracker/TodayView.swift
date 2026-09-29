@@ -101,14 +101,47 @@ struct TodayView: View {
                                    source: weights.entries.first.map { MetricSource.label($0.source) } ?? "No value",
                                    recordedAt: weights.entries.first?.measuredAt,
                                    action: { showingWeightEntry = true })
+                    metric("Steps", value: health.today.steps, format: "%.0f", unit: "steps", icon: "figure.walk")
+                    metric("Active energy", value: health.today.activeKcal, format: "%.0f", unit: "kcal", icon: "flame")
+                    TimelineView(.periodic(from: .now, by: 60)) { timeline in
+                        let burned = dailyEnergy.summary(for: timeline.date, now: timeline.date,
+                                                         weights: weights.entries)
+                        VStack(alignment: .leading, spacing: 4) {
+                            metric("Total calories burned", value: burned?.totalKcal,
+                                   format: "%.0f", unit: "kcal", icon: "flame.circle")
+                            if let burned {
+                                Text("\(Int(burned.measuredKcal)) recorded · \(Int(burned.estimatedKcal)) estimated for missing hours")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                if burned.isPartial {
+                                    Text("Some hours need an earlier app-entered weight to estimate.")
+                                        .font(.caption).foregroundStyle(.secondary)
+                                }
+                            }
+                        }
+                    }
+                    VStack(alignment: .leading, spacing: 4) {
+                        metric("Estimated calorie intake", value: estimatedCaloriesToday,
+                               format: "%.0f", unit: "kcal", icon: "fork.knife")
+                        if missingCaloriesToday > 0 {
+                            Text("\(missingCaloriesToday) meal\(missingCaloriesToday == 1 ? "" : "s") missing a calorie estimate")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
+                    }
+                    VStack(alignment: .leading, spacing: 4) {
+                        metric("Estimated protein intake", value: estimatedProteinToday,
+                               format: "%.1f", unit: "g", icon: "circle.grid.2x2")
+                        if missingProteinToday > 0 {
+                            Text("\(missingProteinToday) meal\(missingProteinToday == 1 ? "" : "s") missing a protein estimate")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
+                    }
                     editableMetric("Fat-free mass", value: selectedLeanMassKg,
                                    format: "%.1f", unit: "kg", icon: "figure.strengthtraining.traditional",
                                    source: leanMass.entries.first.map { MetricSource.label($0.source) }
                                        ?? (health.today.appleLeanMassKg == nil ? "No value" : "Apple Health"),
                                    recordedAt: leanMass.entries.first?.measuredAt,
                                    action: { showingLeanMassEntry = true })
-                    metric("Steps", value: health.today.steps, format: "%.0f", unit: "steps", icon: "figure.walk")
-                    metric("Active energy", value: health.today.activeKcal, format: "%.0f", unit: "kcal", icon: "flame")
                     editableMetric(energy.latest(for: .basal) == nil ? "Basal energy today" : "Estimated basal energy",
                                    value: energy.latest(for: .basal)?.kilocalories ?? health.today.basalKcal,
                                    format: "%.0f", unit: energy.latest(for: .basal) == nil ? "kcal" : "kcal/day",
@@ -124,22 +157,6 @@ struct TodayView: View {
                                        ?? (maintenanceEstimate == nil ? "No value" : "Formula"),
                                    recordedAt: maintenanceTarget?.recordedAt,
                                    action: { editingEnergy = .maintenance })
-                    TimelineView(.periodic(from: .now, by: 60)) { timeline in
-                        if let burned = dailyEnergy.summary(for: timeline.date, now: timeline.date,
-                                                            weights: weights.entries) {
-                            VStack(alignment: .leading, spacing: 4) {
-                                metric("Total burned so far", value: burned.totalKcal,
-                                       format: "%.0f", unit: "kcal", icon: "flame.circle")
-                                Text("\(Int(burned.measuredKcal)) recorded · \(Int(burned.estimatedKcal)) estimated for missing hours")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                                if burned.isPartial {
-                                    Text("Some hours need an earlier app-entered weight to estimate.")
-                                        .font(.caption).foregroundStyle(.secondary)
-                                }
-                            }
-                        }
-                    }
                     editableMetric("Protein target",
                                    displayValue: proteinTargetDisplay,
                                    icon: "figure.strengthtraining.traditional",
@@ -154,25 +171,10 @@ struct TodayView: View {
                 VStack(alignment: .leading, spacing: 12) {
                     Text("Meals logged today")
                         .font(.headline)
-                    let todayMeals = meals.meals.filter { Calendar.current.isDateInToday($0.eatenAt) }
                     if todayMeals.isEmpty {
                         Text("No meals yet. Use Add Meal to save a note, photo, or both.")
                             .foregroundStyle(.secondary)
                     } else {
-                        Text("Estimated eaten so far: \(Int(mealEstimates.totalCalories(for: todayMeals))) kcal · \(mealEstimates.totalProtein(for: todayMeals).formatted(.number.precision(.fractionLength(0...1)))) g protein")
-                            .font(.headline)
-                        let pending = mealEstimates.unestimatedCount(for: todayMeals)
-                        if pending > 0 {
-                            Text("\(pending) meal\(pending == 1 ? "" : "s") without a calorie estimate")
-                                .font(.subheadline)
-                                .foregroundStyle(.secondary)
-                        }
-                        let missingProtein = mealEstimates.missingProteinCount(for: todayMeals)
-                        if missingProtein > 0 {
-                            Text("Protein total is partial: \(missingProtein) meal\(missingProtein == 1 ? "" : "s") missing a protein estimate")
-                                .font(.subheadline)
-                                .foregroundStyle(.secondary)
-                        }
                         ForEach(todayMeals) { meal in
                             Button {
                                 selectedMeal = meal
@@ -264,6 +266,26 @@ struct TodayView: View {
 
     private var selectedLeanMassKg: Double? {
         leanMass.entries.first?.kilograms ?? health.today.appleLeanMassKg
+    }
+
+    private var todayMeals: [Meal] {
+        meals.meals.filter { Calendar.current.isDateInToday($0.eatenAt) }
+    }
+
+    private var missingCaloriesToday: Int {
+        mealEstimates.unestimatedCount(for: todayMeals)
+    }
+
+    private var missingProteinToday: Int {
+        mealEstimates.missingProteinCount(for: todayMeals)
+    }
+
+    private var estimatedCaloriesToday: Double? {
+        todayMeals.count > missingCaloriesToday ? mealEstimates.totalCalories(for: todayMeals) : nil
+    }
+
+    private var estimatedProteinToday: Double? {
+        todayMeals.count > missingProteinToday ? mealEstimates.totalProtein(for: todayMeals) : nil
     }
 
     private var isAnySyncRunning: Bool {
