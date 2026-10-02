@@ -20,6 +20,7 @@ targets:
       Release: Config/Local.xcconfig
     dependencies:
       - package: Supabase
+        product: PostgREST
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.personal.healthtracker.ursehfspdrzpuytymbrn
@@ -35,13 +36,12 @@ targets:
         UIRequiredDeviceCapabilities: [healthkit]
         NSHealthShareUsageDescription: "Show your health activity and trends in your private tracker."
         NSCameraUsageDescription: "Take a photo of a meal to save in your private log."
-        SupabaseURL: $(SUPABASE_URL)
-        SupabasePublishableKey: $(SUPABASE_PUBLISHABLE_KEY)
+        NeonAuthURL: $(NEON_AUTH_URL)
+        NeonDataAPIURL: $(NEON_DATA_API_URL)
+        NeonMealImageURL: $(NEON_MEAL_IMAGE_URL)
         UIBackgroundModes: [fetch]
         BGTaskSchedulerPermittedIdentifiers:
           - com.personal.healthtracker.ursehfspdrzpuytymbrn.refresh
-        CFBundleURLTypes:
-          - CFBundleURLSchemes: [healthtracker]
   PersonalHealthTrackerTests:
     type: bundle.unit-test
     platform: iOS

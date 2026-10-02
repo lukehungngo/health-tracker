@@ -1,5 +1,10 @@
 import SwiftUI
 
+private struct NetWindowLoadKey: Hashable {
+    let userID: UUID?
+    let day: Date
+}
+
 struct TodayView: View {
     @EnvironmentObject private var health: HealthStore
     @EnvironmentObject private var meals: MealStore
@@ -77,7 +82,6 @@ struct TodayView: View {
                                     await sync.run(userID: userID, meals: meals, weights: weights,
                                                    leanMass: leanMass, energy: energy, profile: profile,
                                                    mealEstimates: mealEstimates)
-                                    await dailyEnergy.loadMonth(.now, userID: userID, force: true)
                                     await proteinTargets.sync(userID: userID)
                                 }
                             }
@@ -134,6 +138,20 @@ struct TodayView: View {
                         if missingProteinToday > 0 {
                             Text("\(missingProteinToday) meal\(missingProteinToday == 1 ? "" : "s") missing a protein estimate")
                                 .font(.caption).foregroundStyle(.secondary)
+                        }
+                    }
+                    TimelineView(.periodic(from: .now, by: 60)) { timeline in
+                        let sevenDays = netCalories(days: 7, now: timeline.date)
+                        let thirtyDays = netCalories(days: 30, now: timeline.date)
+                        VStack(spacing: 12) {
+                            netMetric("Net calories · last 7 days", summary: sevenDays)
+                            netMetric("Net calories · last 30 days", summary: thirtyDays)
+                        }
+                        .task(id: NetWindowLoadKey(userID: auth.userID,
+                                                    day: Calendar.current.startOfDay(for: timeline.date))) {
+                            if let userID = auth.userID {
+                                await dailyEnergy.loadRecentDays(30, through: timeline.date, userID: userID)
+                            }
                         }
                     }
                     editableMetric("Fat-free mass", value: selectedLeanMassKg,
@@ -221,7 +239,7 @@ struct TodayView: View {
         .navigationBarTitleDisplayMode(.inline)
         .onChange(of: sync.lastSuccess) { _, _ in
             if let userID = auth.userID {
-                Task { await dailyEnergy.loadMonth(.now, userID: userID, force: true) }
+                Task { await dailyEnergy.loadRecentDays(30, through: .now, userID: userID, force: true) }
             }
         }
         .sheet(isPresented: $showingWeightEntry) {
@@ -288,6 +306,13 @@ struct TodayView: View {
         todayMeals.count > missingProteinToday ? mealEstimates.totalProtein(for: todayMeals) : nil
     }
 
+    private func netCalories(days: Int, now: Date) -> NetCaloriesSummary {
+        NetCaloriesCalculator.summary(days: days, through: now, calendar: .current,
+                                      meals: meals.meals, estimates: mealEstimates.estimates) { day in
+            dailyEnergy.summary(for: day, now: now, weights: weights.entries)
+        }
+    }
+
     private var isAnySyncRunning: Bool {
         sync.isSyncing || sync.isRefreshingValues || sync.isRefreshingMeals ||
             proteinTargets.isSyncing || health.isRefreshing
@@ -343,6 +368,33 @@ struct TodayView: View {
         .frame(minHeight: 56)
         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14))
         .accessibilityElement(children: .combine)
+    }
+
+    private func netMetric(_ title: String, summary: NetCaloriesSummary) -> some View {
+        let value = summary.kilocalories
+        let color: Color = value.map { $0 < 0 ? .green : $0 > 0 ? .red : .primary } ?? .primary
+        return VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 16) {
+                Image(systemName: "plusminus.circle")
+                    .frame(width: 28)
+                    .foregroundStyle(.teal)
+                    .accessibilityHidden(true)
+                Text(title)
+                Spacer()
+                Text(value.map { String(format: "%+.0f kcal", $0) } ?? "—")
+                    .fontWeight(.semibold)
+                    .monospacedDigit()
+                    .foregroundStyle(color)
+            }
+            Text("\(summary.countedDays)/\(summary.windowDays) days counted · missing logs or energy excluded")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+        .padding(16)
+        .frame(minHeight: 72)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14))
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("\(title), \(value.map { String(format: "%+.0f kilocalories", $0) } ?? "unknown"), \(summary.countedDays) of \(summary.windowDays) days counted")
     }
 
     private func editableMetric(_ title: String, value: Double?, format: String, unit: String,

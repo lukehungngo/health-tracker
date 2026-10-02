@@ -1,6 +1,16 @@
 import Foundation
 import HealthKit
-import Supabase
+import PostgREST
+
+enum HealthSyncWindow {
+    static func cutoff(now: Date, calendar: Calendar) -> Date {
+        calendar.date(byAdding: .month, value: -12, to: now) ?? now
+    }
+
+    static func includes(endAt: Date, since cutoff: Date) -> Bool {
+        endAt >= cutoff
+    }
+}
 
 private struct HealthSampleUpload: Encodable {
     let user_id: UUID
@@ -109,7 +119,7 @@ final class CloudSync: ObservableObject {
     @Published var mealMessage: String?
     @Published var valueMessage: String?
 
-    private let client = SupabaseConnection.client
+    private let client = NeonConnection.client
     private let health = HKHealthStore()
     private let batchLimit = 250
     private var mealRefreshQueued = false
@@ -189,31 +199,35 @@ final class CloudSync: ObservableObject {
         return
 #else
         guard HKHealthStore.isHealthDataAvailable() else { return }
+        let cutoff = HealthSyncWindow.cutoff(now: Date(), calendar: .current)
         let quantityIDs: [HKQuantityTypeIdentifier] = [
             .height, .bodyFatPercentage, .leanBodyMass, .stepCount,
             .activeEnergyBurned, .basalEnergyBurned, .distanceWalkingRunning,
             .heartRate, .restingHeartRate
         ]
         // Prioritize the records missing from History before a large quantity-sample backfill.
-        try await sync(type: .workoutType(), userID: userID)
+        try await sync(type: .workoutType(), userID: userID, since: cutoff)
         let sampleTypes: [HKSampleType] = [HKObjectType.categoryType(forIdentifier: .sleepAnalysis)!]
             + quantityIDs.compactMap { HKObjectType.quantityType(forIdentifier: $0) }
         for type in sampleTypes {
-            try await sync(type: type, userID: userID)
+            try await sync(type: type, userID: userID, since: cutoff)
         }
 #endif
     }
 
-    private func sync(type: HKSampleType, userID: UUID) async throws {
+    private func sync(type: HKSampleType, userID: UUID, since cutoff: Date) async throws {
         let key = "health-anchor.\(userID.uuidString).\(type.identifier)"
         var anchor = try savedAnchor(for: key)
 
         while true {
-            let batch = try await changes(for: type, after: anchor)
+            let batch = try await changes(for: type, after: anchor, since: cutoff)
             if batch.samples.isEmpty && batch.deleted.isEmpty { break }
+            let recentSamples = batch.samples.filter {
+                HealthSyncWindow.includes(endAt: $0.endDate, since: cutoff)
+            }
 
             if type.identifier == HKObjectType.workoutType().identifier {
-                let rows = batch.samples.compactMap { $0 as? HKWorkout }.compactMap { workout -> WorkoutUpload? in
+                let rows = recentSamples.compactMap { $0 as? HKWorkout }.compactMap { workout -> WorkoutUpload? in
                     let reportedDuration = workout.duration
                     guard reportedDuration.isFinite, reportedDuration >= 0 else { return nil }
                     // The server requires duration <= end-start. Whole-second bounds also
@@ -250,7 +264,7 @@ final class CloudSync: ObservableObject {
                         .execute()
                 }
             } else {
-                let rows = batch.samples.compactMap { sample -> HealthSampleUpload? in
+                let rows = recentSamples.compactMap { sample -> HealthSampleUpload? in
                     if let quantity = sample as? HKQuantitySample {
                         let (unit, unitName) = canonicalUnit(for: quantity.quantityType.identifier)
                         return HealthSampleUpload(
@@ -328,10 +342,12 @@ final class CloudSync: ObservableObject {
         return try NSKeyedUnarchiver.unarchivedObject(ofClass: HKQueryAnchor.self, from: data)
     }
 
-    private func changes(for type: HKSampleType, after anchor: HKQueryAnchor?) async throws
+    private func changes(for type: HKSampleType, after anchor: HKQueryAnchor?, since cutoff: Date) async throws
         -> (samples: [HKSample], deleted: [HKDeletedObject], anchor: HKQueryAnchor?) {
         try await withCheckedThrowingContinuation { continuation in
-            let query = HKAnchoredObjectQuery(type: type, predicate: nil, anchor: anchor, limit: batchLimit) {
+            let predicate = HKQuery.predicateForSamples(withStart: cutoff, end: nil,
+                                                        options: .strictEndDate)
+            let query = HKAnchoredObjectQuery(type: type, predicate: predicate, anchor: anchor, limit: batchLimit) {
                 _, samples, deleted, nextAnchor, error in
                 if let error { continuation.resume(throwing: error); return }
                 continuation.resume(returning: (samples ?? [], deleted ?? [], nextAnchor))
@@ -353,7 +369,7 @@ final class CloudSync: ObservableObject {
                     throw SyncError.invalidMealPath
                 }
                 if meals.needsRemoteImage(id: meal.id, path: path) {
-                    imageData = try await client.storage.from("meal-images").download(path: path)
+                    imageData = try await NeonMealImages.download(path: path)
                 }
             }
             try meals.importRemote(id: meal.id, eatenAt: meal.eaten_at, note: meal.note,
@@ -365,9 +381,7 @@ final class CloudSync: ObservableObject {
             if let imageName = meal.imageName, path == nil {
                 guard let data = meals.imageData(for: meal) else { throw SyncError.missingMealImage }
                 path = "\(userID.uuidString.lowercased())/\(imageName)"
-                try await client.storage.from("meal-images")
-                    .upload(path!, data: data,
-                            options: FileOptions(contentType: "image/jpeg", upsert: true))
+                try await NeonMealImages.upload(path: path!, data: data)
             }
             let row = MealUpload(id: meal.id, user_id: userID, eaten_at: meal.eatenAt,
                                  note: meal.note, image_path: path)

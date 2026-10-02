@@ -3,6 +3,11 @@
 build/
 PersonalHealthTracker.xcodeproj/
 Config/Local.xcconfig
+Config/SupabaseArchive.xcconfig
 *.xcuserstate
 xcuserdata/
 supabase/.temp/
+node_modules/
+.env
+.env.local
+.neon

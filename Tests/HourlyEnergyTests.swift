@@ -99,4 +99,55 @@ final class HourlyEnergyTests: XCTestCase {
         XCTAssertEqual(CalorieBalance.evaluate(mealCount: 1, missingEstimates: 0,
                                               intakeKcal: 1_800, burned: partial, future: false), .unknown)
     }
+
+    func testNetWindowsCrossMonthAndIncludeOnlyLoggedEstimatedDays() {
+        func at(_ month: Int, _ day: Int, _ hour: Int = 12) -> Date {
+            calendar.date(from: DateComponents(year: 2026, month: month, day: day, hour: hour))!
+        }
+        let now = at(10, 2)
+        let today = Meal(id: UUID(), eatenAt: at(10, 2, 9), note: "Breakfast", imageName: nil,
+                         remoteImagePath: nil)
+        let recent = Meal(id: UUID(), eatenAt: at(9, 30), note: "Dinner", imageName: nil,
+                          remoteImagePath: nil)
+        let older = Meal(id: UUID(), eatenAt: at(9, 3), note: "Lunch", imageName: nil,
+                         remoteImagePath: nil)
+        let outside = Meal(id: UUID(), eatenAt: at(9, 2), note: "Old", imageName: nil,
+                           remoteImagePath: nil)
+        let incomplete = Meal(id: UUID(), eatenAt: at(10, 1), note: "No kcal", imageName: nil,
+                              remoteImagePath: nil)
+        let future = Meal(id: UUID(), eatenAt: at(10, 2, 18), note: "Future dinner", imageName: nil,
+                          remoteImagePath: nil)
+        let meals = [today, recent, older, outside, incomplete, future]
+        let estimates = [today, recent, older, outside].map { meal in
+            MealEstimate(id: UUID(), meal_id: meal.id, calories_kcal: 1_500,
+                         protein_g: nil, carbs_g: nil, fat_g: nil, confidence: nil)
+        }
+        let burned = DailyEnergySummary(measuredKcal: 1_200, estimatedKcal: 800,
+                                        uncoveredHours: 0, assumedSleepHours: 0)
+        let seven = NetCaloriesCalculator.summary(days: 7, through: now, calendar: calendar,
+                                                  meals: meals, estimates: estimates) { _ in burned }
+        XCTAssertEqual(seven.kilocalories, -1_000)
+        XCTAssertEqual(seven.countedDays, 2)
+        XCTAssertEqual(seven.windowDays, 7)
+
+        let thirty = NetCaloriesCalculator.summary(days: 30, through: now, calendar: calendar,
+                                                   meals: meals, estimates: estimates) { _ in burned }
+        XCTAssertEqual(thirty.kilocalories, -1_500)
+        XCTAssertEqual(thirty.countedDays, 3)
+        XCTAssertEqual(thirty.windowDays, 30)
+    }
+
+    func testNetWindowRejectsPartialBurnAndDoesNotTurnNoMealsIntoZero() {
+        let now = calendar.date(from: DateComponents(year: 2026, month: 10, day: 2, hour: 12))!
+        let meal = Meal(id: UUID(), eatenAt: now.addingTimeInterval(-3600), note: "Lunch",
+                        imageName: nil, remoteImagePath: nil)
+        let estimate = MealEstimate(id: UUID(), meal_id: meal.id, calories_kcal: 500,
+                                    protein_g: nil, carbs_g: nil, fat_g: nil, confidence: nil)
+        let partialBurn = DailyEnergySummary(measuredKcal: 300, estimatedKcal: 0,
+                                             uncoveredHours: 1, assumedSleepHours: 0)
+        let result = NetCaloriesCalculator.summary(days: 7, through: now, calendar: calendar,
+                                                   meals: [meal], estimates: [estimate]) { _ in partialBurn }
+        XCTAssertNil(result.kilocalories)
+        XCTAssertEqual(result.countedDays, 0)
+    }
 }

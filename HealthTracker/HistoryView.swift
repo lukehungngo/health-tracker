@@ -1,5 +1,5 @@
 import HealthKit
-import Supabase
+import PostgREST
 import SwiftUI
 
 private struct SyncedWorkout: Decodable, Identifiable {
@@ -70,7 +70,7 @@ struct HistoryView: View {
                 }
                 .disabled(isLoading || sync.isRefreshingMeals || auth.userID == nil)
             } footer: {
-                Text("Meals refresh independently of a long HealthKit upload. Workouts and recorded sleep are read from Supabase for the selected day; use Sync Now in Settings if HealthKit history is still uploading.")
+                Text("Meals refresh independently of a long HealthKit upload. Workouts and recorded sleep are read from Neon for the selected day; use Sync Now in Settings if HealthKit history is still uploading.")
             }
 
             if isLoading { ProgressView("Loading history") }
@@ -248,7 +248,7 @@ struct HistoryView: View {
               let sleepStart = calendar.date(byAdding: .hour, value: -12, to: start),
               let sleepEnd = calendar.date(byAdding: .hour, value: 12, to: start) else { return }
         do {
-            let loadedWorkouts: [SyncedWorkout] = try await SupabaseConnection.client.from("workouts")
+            let loadedWorkouts: [SyncedWorkout] = try await NeonConnection.client.from("workouts")
                 .select("id,start_at,duration_seconds")
                 .eq("user_id", value: userID.uuidString)
                 .gte("start_at", value: start.ISO8601Format())
@@ -256,7 +256,7 @@ struct HistoryView: View {
                 .order("start_at", ascending: false)
                 .execute()
                 .value
-            let loadedSleep: [SyncedSleep] = try await SupabaseConnection.client.from("health_samples")
+            let loadedSleep: [SyncedSleep] = try await NeonConnection.client.from("health_samples")
                 .select("start_at,end_at,value")
                 .eq("user_id", value: userID.uuidString)
                 .eq("type", value: HKCategoryTypeIdentifier.sleepAnalysis.rawValue)

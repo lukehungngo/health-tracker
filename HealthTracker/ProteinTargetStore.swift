@@ -1,5 +1,5 @@
 import Foundation
-import Supabase
+import PostgREST
 
 struct ProteinTargetEntry: Codable, Identifiable, Equatable {
     let id: UUID
@@ -58,7 +58,7 @@ final class ProteinTargetStore: ObservableObject {
     @Published var errorMessage: String?
 
     private let indexURL: URL
-    private let client = SupabaseConnection.client
+    private let client = NeonConnection.client
 
     init(directory: URL? = nil) {
         let documents = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]

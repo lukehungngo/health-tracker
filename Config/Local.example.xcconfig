@@ -1,3 +1,4 @@
-// Copy to Local.xcconfig and set client-safe values for your own project.
-SUPABASE_URL = https:/$()/YOUR_PROJECT.supabase.co
-SUPABASE_PUBLISHABLE_KEY = YOUR_PUBLISHABLE_KEY
+// Copy to Local.xcconfig. These are public Neon endpoints, not credentials.
+NEON_AUTH_URL = https:/$()/ep-tiny-firefly-b3peqnbm.neonauth.c-4.ap-southeast-1.aws.neon.tech/neondb/auth
+NEON_DATA_API_URL = https:/$()/ep-tiny-firefly-b3peqnbm.apirest.c-4.ap-southeast-1.aws.neon.tech/neondb/rest/v1
+NEON_MEAL_IMAGE_URL = https:/$()/br-quiet-hall-b3cqwaxl-mealimages.compute.c-4.ap-southeast-1.aws.neon.tech/

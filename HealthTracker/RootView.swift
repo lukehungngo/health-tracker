@@ -63,19 +63,15 @@ struct RootView: View {
             }
         }
         .onChange(of: scenePhase) { _, phase in
-            if phase == .active { try? weights.loadIfNeeded() }
+            if phase == .active {
+                try? weights.loadIfNeeded()
+                if let userID = auth.userID {
+                    Task { await sync.refreshMeals(userID: userID, meals: meals, mealEstimates: mealEstimates) }
+                }
+            }
         }
         .onReceive(NotificationCenter.default.publisher(for: UIApplication.protectedDataDidBecomeAvailableNotification)) { _ in
             try? weights.loadIfNeeded()
-        }
-        .onOpenURL { url in
-            Task {
-                await auth.handleCallback(url)
-                if let userID = auth.userID {
-                    await sync.run(userID: userID, meals: meals, weights: weights, leanMass: leanMass, energy: energy, profile: profile, mealEstimates: mealEstimates)
-                    await dailyEnergy.loadMonth(.now, userID: userID, force: true)
-                }
-            }
         }
         .onChange(of: auth.userID) { _, userID in
             if let userID {

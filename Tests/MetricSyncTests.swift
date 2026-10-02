@@ -4,6 +4,19 @@ import XCTest
 
 @MainActor
 final class MetricSyncTests: XCTestCase {
+    func testHealthKitBackfillStopsAtTwelveCalendarMonths() throws {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "Asia/Ho_Chi_Minh")!
+        let now = try XCTUnwrap(calendar.date(from: DateComponents(year: 2026, month: 10, day: 2,
+                                                                   hour: 19, minute: 17)))
+        let cutoff = HealthSyncWindow.cutoff(now: now, calendar: calendar)
+        XCTAssertEqual(calendar.dateComponents([.year, .month, .day], from: cutoff),
+                       DateComponents(year: 2025, month: 10, day: 2))
+        XCTAssertFalse(HealthSyncWindow.includes(endAt: cutoff.addingTimeInterval(-1), since: cutoff))
+        XCTAssertTrue(HealthSyncWindow.includes(endAt: cutoff, since: cutoff))
+        XCTAssertTrue(HealthSyncWindow.includes(endAt: now, since: cutoff))
+    }
+
     // A failed startup read must never turn an unread local file into an empty
     // cache that a subsequent cloud merge/save can overwrite.
     func testWeightMergeRetriesFailedLoadAndPreservesPendingLocalWeight() throws {

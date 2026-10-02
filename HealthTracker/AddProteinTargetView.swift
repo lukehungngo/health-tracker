@@ -34,7 +34,7 @@ struct AddProteinTargetView: View {
                         .keyboardType(.decimalPad)
                     DatePicker("Recorded at", selection: $recordedAt, in: ...Date())
                 } footer: {
-                    Text("A daily protein reference range, not a meal log or medical prescription. AI can update the same range in Supabase; the newest entry appears on Today.")
+                    Text("A daily protein reference range, not a meal log or medical prescription. AI can update the same range in Neon; the newest entry appears on Today.")
                 }
                 if let errorMessage {
                     Section { Text(errorMessage).foregroundStyle(.red) }

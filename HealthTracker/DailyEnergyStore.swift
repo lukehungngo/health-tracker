@@ -1,6 +1,6 @@
 import Foundation
 import HealthKit
-import Supabase
+import PostgREST
 
 struct HourlyEnergy: Decodable {
     let hour_at: Date
@@ -56,6 +56,39 @@ enum CalorieBalance: Equatable {
         case .surplus: 1
         case .unknown, .even: 0
         }
+    }
+}
+
+struct NetCaloriesSummary {
+    let kilocalories: Double?
+    let countedDays: Int
+    let windowDays: Int
+}
+
+enum NetCaloriesCalculator {
+    static func summary(days: Int, through now: Date, calendar: Calendar,
+                        meals: [Meal], estimates: [MealEstimate],
+                        burnedFor: (Date) -> DailyEnergySummary?) -> NetCaloriesSummary {
+        guard days > 0 else { return NetCaloriesSummary(kilocalories: nil, countedDays: 0, windowDays: 0) }
+        let endDay = calendar.startOfDay(for: now)
+        let estimatesByMeal = Dictionary(estimates.map { ($0.meal_id, $0) },
+                                         uniquingKeysWith: { first, _ in first })
+        var net = 0.0
+        var counted = 0
+        for offset in 0..<days {
+            guard let day = calendar.date(byAdding: .day, value: -offset, to: endDay) else { continue }
+            let dayMeals = meals.filter {
+                $0.eatenAt <= now && calendar.isDate($0.eatenAt, inSameDayAs: day)
+            }
+            guard !dayMeals.isEmpty,
+                  let burned = burnedFor(day), !burned.isPartial else { continue }
+            let calories = dayMeals.compactMap { estimatesByMeal[$0.id]?.calories_kcal }
+            guard calories.count == dayMeals.count else { continue }
+            net += calories.reduce(0, +) - burned.totalKcal
+            counted += 1
+        }
+        return NetCaloriesSummary(kilocalories: counted > 0 ? net : nil,
+                                  countedDays: counted, windowDays: days)
     }
 }
 
@@ -129,7 +162,7 @@ final class DailyEnergyStore: ObservableObject {
     @Published private(set) var isLoading = false
     @Published private(set) var errorMessage: String?
 
-    private let client = SupabaseConnection.client
+    private let client = NeonConnection.client
     private var loadedUserID: UUID?
 
     func clear() {
@@ -182,6 +215,22 @@ final class DailyEnergyStore: ObservableObject {
                 errorMessage = "Energy could not load: \(error.localizedDescription)"
             }
         }
+    }
+
+    func loadRecentDays(_ days: Int, through date: Date, userID: UUID, force: Bool = false) async {
+        guard days > 0,
+              let oldest = Calendar.current.date(byAdding: .day, value: 1 - days,
+                                                  to: Calendar.current.startOfDay(for: date)) else { return }
+        let oldestMonth = monthStart(oldest)
+        var month = monthStart(date)
+        var failed = false
+        while month >= oldestMonth {
+            await loadMonth(month, userID: userID, force: force)
+            failed = failed || months[month] == nil
+            guard let previous = Calendar.current.date(byAdding: .month, value: -1, to: month) else { break }
+            month = previous
+        }
+        if failed { errorMessage = "Some recent energy data could not load; net calories are partial." }
     }
 
     private func monthStart(_ date: Date) -> Date {

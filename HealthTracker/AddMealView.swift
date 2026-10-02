@@ -54,7 +54,7 @@ struct AddMealView: View {
                     .frame(maxWidth: .infinity, minHeight: 44)
                     .disabled((image == nil && note.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty) || isLoadingPhoto)
             } footer: {
-                Text(auth.userID == nil ? "Saved on this phone. Sign in under Settings to sync." : "Saved on this phone first, then uploaded to Supabase.")
+                Text(auth.userID == nil ? "Saved on this phone. Sign in under Settings to sync." : "Saved on this phone first, then uploaded to Neon.")
             }
 
             if let message {
