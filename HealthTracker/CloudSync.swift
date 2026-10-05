@@ -1,6 +1,5 @@
 import Foundation
 import HealthKit
-import PostgREST
 
 enum HealthSyncWindow {
     static func cutoff(now: Date, calendar: Calendar) -> Date {

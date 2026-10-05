@@ -1,5 +1,4 @@
 import Foundation
-import PostgREST
 
 struct ProteinTargetEntry: Codable, Identifiable, Equatable {
     let id: UUID

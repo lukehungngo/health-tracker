@@ -1,6 +1,5 @@
 import Foundation
 import HealthKit
-import PostgREST
 
 struct HourlyEnergy: Decodable {
     let hour_at: Date

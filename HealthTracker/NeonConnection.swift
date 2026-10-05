@@ -1,5 +1,4 @@
 import Foundation
-import PostgREST
 import Security
 
 enum NeonConnection {
@@ -7,11 +6,11 @@ enum NeonConnection {
     static let dataURL = configuredURL("NeonDataAPIURL")
     static let mealImageURL = configuredURL("NeonMealImageURL")
 
-    static let client = PostgrestClient(configuration: .init(url: dataURL, logger: nil, fetch: { request in
+    static let client = NeonDataClient(baseURL: dataURL, fetch: { request in
         var authorized = request
         authorized.setValue("Bearer \(try await NeonSession.shared.jwt())", forHTTPHeaderField: "Authorization")
         return try await URLSession.shared.data(for: authorized)
-    }))
+    })
 
     private static func configuredURL(_ key: String) -> URL {
         guard let raw = Bundle.main.object(forInfoDictionaryKey: key) as? String,

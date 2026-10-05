@@ -1,5 +1,4 @@
 import HealthKit
-import PostgREST
 import SwiftUI
 
 private struct SyncedWorkout: Decodable, Identifiable {
