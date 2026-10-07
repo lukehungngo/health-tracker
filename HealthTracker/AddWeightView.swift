@@ -3,6 +3,7 @@ import SwiftUI
 struct AddWeightView: View {
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var weights: WeightStore
+    @EnvironmentObject private var waist: WaistStore
     @EnvironmentObject private var leanMass: LeanMassStore
     @EnvironmentObject private var energy: EnergyStore
     @EnvironmentObject private var profile: ProfileStore
@@ -63,7 +64,8 @@ struct AddWeightView: View {
             try weights.save(kilograms: kilograms, measuredAt: measuredAt)
             dismiss()
             if let userID = auth.userID {
-                Task { await sync.refreshValues(userID: userID, weights: weights, leanMass: leanMass, energy: energy) }
+                Task { await sync.refreshValues(userID: userID, weights: weights, waist: waist,
+                                                leanMass: leanMass, energy: energy) }
             }
         } catch {
             errorMessage = error.localizedDescription

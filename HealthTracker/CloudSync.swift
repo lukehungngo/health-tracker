@@ -123,7 +123,7 @@ final class CloudSync: ObservableObject {
     private let batchLimit = 250
     private var mealRefreshQueued = false
 
-    func run(userID: UUID, meals: MealStore, weights: WeightStore, leanMass: LeanMassStore, energy: EnergyStore, profile: ProfileStore,
+    func run(userID: UUID, meals: MealStore, weights: WeightStore, waist: WaistStore, leanMass: LeanMassStore, energy: EnergyStore, profile: ProfileStore,
              mealEstimates: MealEstimateStore) async {
         guard !isSyncing else { return }
         let lastSuccessKey = "last-cloud-sync.\(userID.uuidString)"
@@ -136,6 +136,7 @@ final class CloudSync: ObservableObject {
         await refreshMeals(userID: userID, meals: meals, mealEstimates: mealEstimates)
         do {
             try await syncWeights(userID: userID, weights: weights)
+            try await syncWaist(userID: userID, waist: waist)
             try await syncLeanMass(userID: userID, leanMass: leanMass)
             try await syncEnergy(userID: userID, energy: energy)
             lastValueSync = Date()
@@ -149,7 +150,7 @@ final class CloudSync: ObservableObject {
         }
     }
 
-    func refreshValues(userID: UUID, weights: WeightStore, leanMass: LeanMassStore,
+    func refreshValues(userID: UUID, weights: WeightStore, waist: WaistStore, leanMass: LeanMassStore,
                        energy: EnergyStore) async {
         guard !isRefreshingValues else { return }
         isRefreshingValues = true
@@ -157,6 +158,7 @@ final class CloudSync: ObservableObject {
         defer { isRefreshingValues = false }
         do {
             try await syncWeights(userID: userID, weights: weights)
+            try await syncWaist(userID: userID, waist: waist)
             try await syncLeanMass(userID: userID, leanMass: leanMass)
             try await syncEnergy(userID: userID, energy: energy)
             lastValueSync = Date()
@@ -418,6 +420,31 @@ final class CloudSync: ObservableObject {
             .upsert(rows, onConflict: "user_id,external_id")
             .execute()
         try weights.markUploaded(Set(pending.map(\.id)))
+    }
+
+    private func syncWaist(userID: UUID, waist: WaistStore) async throws {
+        let remote: [ManualMassDownload] = try await client.from("health_samples")
+            .select("external_id,start_at,value,source")
+            .eq("user_id", value: userID.uuidString)
+            .eq("type", value: "app_waist_circumference")
+            .execute()
+            .value
+        try waist.merge(remote.map {
+            WaistEntry(id: $0.external_id, measuredAt: $0.start_at, centimeters: $0.value,
+                       source: $0.source ?? "Cloud", pendingUpload: false)
+        })
+        let pending = waist.pendingEntries
+        guard !pending.isEmpty else { return }
+        let rows = pending.map { entry in
+            HealthSampleUpload(user_id: userID, external_id: entry.id,
+                               type: "app_waist_circumference",
+                               start_at: entry.measuredAt, end_at: entry.measuredAt,
+                               value: entry.centimeters, unit: "cm", source: entry.source)
+        }
+        try await client.from("health_samples")
+            .upsert(rows, onConflict: "user_id,external_id")
+            .execute()
+        try waist.markUploaded(Set(pending.map(\.id)))
     }
 
     private func syncLeanMass(userID: UUID, leanMass: LeanMassStore) async throws {

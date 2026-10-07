@@ -74,7 +74,7 @@ final class BackgroundSync {
         await services.auth.restore()
         guard let userID = services.auth.userID else { return }
         await services.sync.run(userID: userID, meals: services.meals, weights: services.weights,
-                                leanMass: services.leanMass, energy: services.energy,
+                                waist: services.waist, leanMass: services.leanMass, energy: services.energy,
                                 profile: services.profile, mealEstimates: services.mealEstimates)
         await services.proteinTargets.sync(userID: userID)
         await services.health.refresh()

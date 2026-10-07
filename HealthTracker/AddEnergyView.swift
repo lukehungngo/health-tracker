@@ -6,6 +6,7 @@ struct AddEnergyView: View {
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var energy: EnergyStore
     @EnvironmentObject private var weights: WeightStore
+    @EnvironmentObject private var waist: WaistStore
     @EnvironmentObject private var leanMass: LeanMassStore
     @EnvironmentObject private var auth: AuthStore
     @EnvironmentObject private var sync: CloudSync
@@ -61,7 +62,7 @@ struct AddEnergyView: View {
             dismiss()
             if let userID = auth.userID {
                 Task {
-                    await sync.refreshValues(userID: userID, weights: weights,
+                    await sync.refreshValues(userID: userID, weights: weights, waist: waist,
                                              leanMass: leanMass, energy: energy)
                 }
             }

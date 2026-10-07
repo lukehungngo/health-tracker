@@ -1,28 +1,25 @@
 import SwiftUI
 
-struct AddLeanMassView: View {
+struct AddWaistView: View {
     @Environment(\.dismiss) private var dismiss
-    @EnvironmentObject private var leanMass: LeanMassStore
     @EnvironmentObject private var waist: WaistStore
-    @EnvironmentObject private var energy: EnergyStore
     @EnvironmentObject private var weights: WeightStore
-    @EnvironmentObject private var meals: MealStore
-    @EnvironmentObject private var mealEstimates: MealEstimateStore
-    @EnvironmentObject private var profile: ProfileStore
+    @EnvironmentObject private var leanMass: LeanMassStore
+    @EnvironmentObject private var energy: EnergyStore
     @EnvironmentObject private var auth: AuthStore
     @EnvironmentObject private var sync: CloudSync
 
+    @FocusState private var valueFocused: Bool
     @State private var valueText = ""
     @State private var measuredAt = Date()
     @State private var errorMessage: String?
 
-    private var kilograms: Double? {
+    private var centimeters: Double? {
         let input = valueText.trimmingCharacters(in: .whitespacesAndNewlines)
             .replacingOccurrences(of: ",", with: ".")
         guard !input.isEmpty, input.filter({ $0 == "." }).count <= 1,
               input.allSatisfy({ $0.isNumber || $0 == "." }),
-              let value = Double(input), (10...200).contains(value),
-              weights.entries.first.map({ value <= $0.kilograms }) ?? true else { return nil }
+              let value = Double(input), WaistStore.isValid(value) else { return nil }
         return value
     }
 
@@ -30,33 +27,48 @@ struct AddLeanMassView: View {
         NavigationStack {
             Form {
                 Section {
-                    TextField("Lean body mass (kg)", text: $valueText)
-                        .keyboardType(.decimalPad)
+                    LabeledContent("Waist circumference") {
+                        HStack(spacing: 4) {
+                            TextField("Value", text: $valueText)
+                                .keyboardType(.decimalPad)
+                                .multilineTextAlignment(.trailing)
+                                .focused($valueFocused)
+                                .accessibilityLabel("Waist circumference in centimeters")
+                            Text("cm").foregroundStyle(.secondary)
+                        }
+                        .frame(width: 100)
+                    }
                     DatePicker("Measured at", selection: $measuredAt, in: ...Date())
-                } footer: {
-                    Text("Enter fat-free/lean body mass from your scale or body-composition report, not skeletal muscle mass. It must not exceed your body weight. Height stays in Settings.")
+                    if !valueText.isEmpty && centimeters == nil {
+                        Text("Enter a value from 30 to 300 cm.")
+                            .font(.footnote)
+                            .foregroundStyle(.red)
+                    }
                 }
                 if let errorMessage {
                     Section { Text(errorMessage).foregroundStyle(.red) }
                 }
             }
-            .navigationTitle("Log new lean mass")
+            .navigationTitle("Log waist circumference")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Save") { save() }.disabled(kilograms == nil)
+                    Button("Save") { save() }.disabled(centimeters == nil)
+                }
+                ToolbarItemGroup(placement: .keyboard) {
+                    Spacer()
+                    Button("Done") { valueFocused = false }
                 }
             }
-            .onAppear { valueText = leanMass.entries.first.map { String($0.kilograms) } ?? "" }
+            .onAppear { valueText = waist.entries.first.map { String($0.centimeters) } ?? "" }
         }
     }
 
     private func save() {
-        guard let kilograms else { return }
+        guard let centimeters else { return }
         do {
-            try leanMass.save(kilograms: kilograms, measuredAt: measuredAt,
-                              latestWeightKg: weights.entries.first?.kilograms)
+            try waist.save(centimeters: centimeters, measuredAt: measuredAt)
             dismiss()
             if let userID = auth.userID {
                 Task {

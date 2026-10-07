@@ -7,6 +7,7 @@ struct RootView: View {
     @EnvironmentObject private var meals: MealStore
     @EnvironmentObject private var mealEstimates: MealEstimateStore
     @EnvironmentObject private var weights: WeightStore
+    @EnvironmentObject private var waist: WaistStore
     @EnvironmentObject private var leanMass: LeanMassStore
     @EnvironmentObject private var energy: EnergyStore
     @EnvironmentObject private var profile: ProfileStore
@@ -55,16 +56,18 @@ struct RootView: View {
         .tint(.teal)
         .task {
             try? weights.loadIfNeeded()
+            try? waist.loadIfNeeded()
             await auth.restore()
             await health.refresh()
             if let userID = auth.userID {
-                await sync.run(userID: userID, meals: meals, weights: weights, leanMass: leanMass, energy: energy, profile: profile, mealEstimates: mealEstimates)
+                await sync.run(userID: userID, meals: meals, weights: weights, waist: waist, leanMass: leanMass, energy: energy, profile: profile, mealEstimates: mealEstimates)
                 await dailyEnergy.loadMonth(.now, userID: userID, force: true)
             }
         }
         .onChange(of: scenePhase) { _, phase in
             if phase == .active {
                 try? weights.loadIfNeeded()
+                try? waist.loadIfNeeded()
                 if let userID = auth.userID {
                     Task { await sync.refreshMeals(userID: userID, meals: meals, mealEstimates: mealEstimates) }
                 }
@@ -72,6 +75,7 @@ struct RootView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: UIApplication.protectedDataDidBecomeAvailableNotification)) { _ in
             try? weights.loadIfNeeded()
+            try? waist.loadIfNeeded()
         }
         .onChange(of: auth.userID) { _, userID in
             if let userID {

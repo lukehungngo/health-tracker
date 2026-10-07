@@ -5,6 +5,7 @@ struct SettingsView: View {
     @EnvironmentObject private var meals: MealStore
     @EnvironmentObject private var mealEstimates: MealEstimateStore
     @EnvironmentObject private var weights: WeightStore
+    @EnvironmentObject private var waist: WaistStore
     @EnvironmentObject private var leanMass: LeanMassStore
     @EnvironmentObject private var energy: EnergyStore
     @EnvironmentObject private var profile: ProfileStore
@@ -30,7 +31,7 @@ struct SettingsView: View {
                         Task {
                             await health.refresh()
                             if let userID = auth.userID {
-                                await sync.run(userID: userID, meals: meals, weights: weights,
+                                await sync.run(userID: userID, meals: meals, weights: weights, waist: waist,
                                                leanMass: leanMass, energy: energy, profile: profile, mealEstimates: mealEstimates)
                             }
                         }
@@ -49,7 +50,7 @@ struct SettingsView: View {
                     Button {
                         if let userID = auth.userID {
                             Task {
-                                await sync.refreshValues(userID: userID, weights: weights,
+                                await sync.refreshValues(userID: userID, weights: weights, waist: waist,
                                                          leanMass: leanMass, energy: energy)
                             }
                         }
@@ -227,7 +228,7 @@ struct SettingsView: View {
         await auth.signIn(email: email, password: password)
         if let userID = auth.userID {
             password = ""
-            await sync.run(userID: userID, meals: meals, weights: weights,
+            await sync.run(userID: userID, meals: meals, weights: weights, waist: waist,
                            leanMass: leanMass, energy: energy, profile: profile, mealEstimates: mealEstimates)
         }
     }
@@ -236,7 +237,7 @@ struct SettingsView: View {
         await auth.signUp(email: email, password: password)
         if let userID = auth.userID {
             password = ""
-            await sync.run(userID: userID, meals: meals, weights: weights,
+            await sync.run(userID: userID, meals: meals, weights: weights, waist: waist,
                            leanMass: leanMass, energy: energy, profile: profile, mealEstimates: mealEstimates)
         }
     }

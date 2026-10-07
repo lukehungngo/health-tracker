@@ -110,6 +110,29 @@ final class MetricSyncTests: XCTestCase {
         XCTAssertEqual(WeightStore(directory: directory).entries.count, 1)
     }
 
+    func testWaistMeasurementPersistsAndCloudRetryIsIdempotent() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let store = WaistStore(directory: directory)
+        let date = Date(timeIntervalSince1970: 1_700_000_000)
+        XCTAssertThrowsError(try store.save(centimeters: 0, measuredAt: date))
+        XCTAssertThrowsError(try store.save(centimeters: .infinity, measuredAt: date))
+        try store.save(centimeters: 88.5, measuredAt: date)
+        let pending = try XCTUnwrap(store.pendingEntries.first)
+        XCTAssertEqual(WaistStore(directory: directory).entries, [pending])
+
+        try store.merge([])
+        XCTAssertEqual(store.pendingEntries, [pending])
+        try store.markUploaded([pending.id])
+        let corrected = WaistEntry(id: pending.id, measuredAt: date, centimeters: 87.2,
+                                   source: "ChatGPT", pendingUpload: false)
+        try store.merge([corrected])
+        try store.merge([corrected])
+        XCTAssertEqual(store.entries, [corrected])
+        XCTAssertTrue(store.pendingEntries.isEmpty)
+        XCTAssertEqual(WaistStore(directory: directory).entries, [corrected])
+    }
+
     func testLegacyLeanMassAndPendingLocalEntrySurviveCloudRefresh() throws {
         struct Legacy: Encodable {
             let id: UUID

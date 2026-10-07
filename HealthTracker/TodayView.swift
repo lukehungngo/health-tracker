@@ -10,6 +10,7 @@ struct TodayView: View {
     @EnvironmentObject private var meals: MealStore
     @EnvironmentObject private var mealEstimates: MealEstimateStore
     @EnvironmentObject private var weights: WeightStore
+    @EnvironmentObject private var waist: WaistStore
     @EnvironmentObject private var leanMass: LeanMassStore
     @EnvironmentObject private var energy: EnergyStore
     @EnvironmentObject private var profile: ProfileStore
@@ -18,6 +19,7 @@ struct TodayView: View {
     @EnvironmentObject private var dailyEnergy: DailyEnergyStore
     @EnvironmentObject private var proteinTargets: ProteinTargetStore
     @State private var showingWeightEntry = false
+    @State private var showingWaistEntry = false
     @State private var showingLeanMassEntry = false
     @State private var editingEnergy: EnergyKind?
     @State private var showingProteinTarget = false
@@ -56,7 +58,7 @@ struct TodayView: View {
                     Button {
                         if let userID = auth.userID {
                             Task { await sync.refreshValues(userID: userID, weights: weights,
-                                                            leanMass: leanMass, energy: energy)
+                                                            waist: waist, leanMass: leanMass, energy: energy)
                                 await proteinTargets.sync(userID: userID) }
                         }
                     } label: {
@@ -79,7 +81,7 @@ struct TodayView: View {
                             Task {
                                 await health.refresh()
                                 if let userID = auth.userID {
-                                    await sync.run(userID: userID, meals: meals, weights: weights,
+                                    await sync.run(userID: userID, meals: meals, weights: weights, waist: waist,
                                                    leanMass: leanMass, energy: energy, profile: profile,
                                                    mealEstimates: mealEstimates)
                                     await proteinTargets.sync(userID: userID)
@@ -154,6 +156,11 @@ struct TodayView: View {
                             }
                         }
                     }
+                    editableMetric("Waist circumference", value: waist.entries.first?.centimeters,
+                                   format: "%.1f", unit: "cm", icon: "ruler",
+                                   source: waist.entries.first.map { MetricSource.label($0.source) } ?? "No value",
+                                   recordedAt: waist.entries.first?.measuredAt,
+                                   action: { showingWaistEntry = true })
                     editableMetric("Fat-free mass", value: selectedLeanMassKg,
                                    format: "%.1f", unit: "kg", icon: "figure.strengthtraining.traditional",
                                    source: leanMass.entries.first.map { MetricSource.label($0.source) }
@@ -245,6 +252,7 @@ struct TodayView: View {
         .sheet(isPresented: $showingWeightEntry) {
             AddWeightView()
                 .environmentObject(weights)
+                .environmentObject(waist)
                 .environmentObject(leanMass)
                 .environmentObject(energy)
                 .environmentObject(profile)
@@ -253,8 +261,18 @@ struct TodayView: View {
                 .environmentObject(auth)
                 .environmentObject(sync)
         }
+        .sheet(isPresented: $showingWaistEntry) {
+            AddWaistView()
+                .environmentObject(waist)
+                .environmentObject(weights)
+                .environmentObject(leanMass)
+                .environmentObject(energy)
+                .environmentObject(auth)
+                .environmentObject(sync)
+        }
         .sheet(isPresented: $showingLeanMassEntry) {
             AddLeanMassView()
+                .environmentObject(waist)
                 .environmentObject(leanMass)
                 .environmentObject(energy)
                 .environmentObject(weights)
@@ -268,6 +286,7 @@ struct TodayView: View {
             AddEnergyView(kind: kind)
                 .environmentObject(energy)
                 .environmentObject(weights)
+                .environmentObject(waist)
                 .environmentObject(leanMass)
                 .environmentObject(auth)
                 .environmentObject(sync)
@@ -322,7 +341,7 @@ struct TodayView: View {
         if let error = sync.valueMessage, !sync.isRefreshingValues { return error }
         if let error = sync.mealMessage, !sync.isRefreshingMeals { return error }
         if let error = sync.message, !sync.isSyncing, error != "Health data synced." { return error }
-        return proteinTargets.errorMessage ?? health.errorMessage ?? weights.errorMessage
+        return proteinTargets.errorMessage ?? health.errorMessage ?? weights.errorMessage ?? waist.errorMessage
     }
 
     private var maintenanceEstimate: MaintenanceEstimate? {
