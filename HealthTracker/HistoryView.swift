@@ -86,9 +86,19 @@ struct HistoryView: View {
                         .font(.caption).foregroundStyle(.secondary)
                 }
                 if let summary = dailyEnergy.summary(for: selectedDate, weights: weights.entries) {
+                    if let active = summary.activeKcal {
+                        LabeledContent("Active energy", value: "\(Int(active)) kcal")
+                        if summary.aiActiveKcal > 0 {
+                            Text("Includes \(Int(summary.aiActiveKcal)) kcal AI backfill")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
+                    }
                     LabeledContent("Total burned", value: "\(Int(summary.totalKcal)) kcal")
                     LabeledContent("Recorded", value: "\(Int(summary.measuredKcal)) kcal")
-                    LabeledContent("Estimated gaps", value: "\(Int(summary.estimatedKcal)) kcal")
+                    if summary.aiBackfillKcal > 0 {
+                        LabeledContent("AI backfill", value: "\(Int(summary.aiBackfillKcal)) kcal")
+                    }
+                    LabeledContent("Modeled gaps", value: "\(Int(summary.estimatedKcal)) kcal")
                     if summary.isPartial {
                         Text("\(summary.uncoveredHours.formatted(.number.precision(.fractionLength(0...1)))) h cannot be estimated without a prior app weight.")
                             .font(.caption).foregroundStyle(.secondary)

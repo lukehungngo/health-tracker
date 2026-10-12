@@ -159,7 +159,7 @@ struct CalendarView: View {
         }
         .buttonStyle(.plain)
         .disabled(future)
-        .accessibilityLabel("\(date.formatted(date: .complete, time: .omitted)). \(dayMeals.isEmpty ? "No meal log" : "Intake \(Int(intake)) kilocalories\(pending > 0 ? ", incomplete" : "")"). Burned \(outtake.map { "\(Int($0.totalKcal)) kilocalories, including \(Int($0.estimatedKcal)) estimated" } ?? "not loaded"). Balance \(balanceLabel). Open history.")
+        .accessibilityLabel("\(date.formatted(date: .complete, time: .omitted)). \(dayMeals.isEmpty ? "No meal log" : "Intake \(Int(intake)) kilocalories\(pending > 0 ? ", incomplete" : "")"). Burned \(outtake.map { "\(Int($0.totalKcal)) kilocalories, including \(Int($0.aiBackfillKcal)) AI backfill and \(Int($0.estimatedKcal)) modeled" } ?? "not loaded"). Balance \(balanceLabel). Open history.")
     }
 
     private func shortKcal(_ value: Double) -> String {

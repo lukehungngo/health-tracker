@@ -72,6 +72,11 @@ struct TodayView: View {
                     .accessibilityLabel("Sync body values")
                     .disabled(auth.userID == nil || isAnySyncRunning)
                     Menu {
+                        Button("Refresh burned energy") {
+                            if let userID = auth.userID {
+                                Task { await dailyEnergy.loadMonth(.now, userID: userID, force: true) }
+                            }
+                        }
                         Button("Refresh meals") {
                             if let userID = auth.userID {
                                 Task { await sync.refreshMeals(userID: userID, meals: meals, mealEstimates: mealEstimates) }
@@ -108,7 +113,18 @@ struct TodayView: View {
                                    recordedAt: weights.entries.first?.measuredAt,
                                    action: { showingWeightEntry = true })
                     metric("Steps", value: health.today.steps, format: "%.0f", unit: "steps", icon: "figure.walk")
-                    metric("Active energy", value: health.today.activeKcal, format: "%.0f", unit: "kcal", icon: "flame")
+                    TimelineView(.periodic(from: .now, by: 60)) { timeline in
+                        let burned = dailyEnergy.summary(for: timeline.date, now: timeline.date,
+                                                         weights: weights.entries)
+                        VStack(alignment: .leading, spacing: 4) {
+                            metric("Active energy", value: burned?.activeKcal ?? health.today.activeKcal,
+                                   format: "%.0f", unit: "kcal", icon: "flame")
+                            if let burned, burned.aiActiveKcal > 0 {
+                                Text("Includes \(Int(burned.aiActiveKcal)) kcal AI backfill")
+                                    .font(.caption).foregroundStyle(.secondary)
+                            }
+                        }
+                    }
                     TimelineView(.periodic(from: .now, by: 60)) { timeline in
                         let burned = dailyEnergy.summary(for: timeline.date, now: timeline.date,
                                                          weights: weights.entries)
@@ -116,7 +132,9 @@ struct TodayView: View {
                             metric("Total calories burned", value: burned?.totalKcal,
                                    format: "%.0f", unit: "kcal", icon: "flame.circle")
                             if let burned {
-                                Text("\(Int(burned.measuredKcal)) recorded · \(Int(burned.estimatedKcal)) estimated for missing hours")
+                                Text(burned.aiBackfillKcal > 0
+                                     ? "\(Int(burned.measuredKcal)) recorded · \(Int(burned.aiBackfillKcal)) AI · \(Int(burned.estimatedKcal)) modeled"
+                                     : "\(Int(burned.measuredKcal)) recorded · \(Int(burned.estimatedKcal)) modeled")
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
                                 if burned.isPartial {

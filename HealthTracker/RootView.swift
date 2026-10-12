@@ -70,6 +70,7 @@ struct RootView: View {
                 try? waist.loadIfNeeded()
                 if let userID = auth.userID {
                     Task { await sync.refreshMeals(userID: userID, meals: meals, mealEstimates: mealEstimates) }
+                    Task { await dailyEnergy.loadMonth(.now, userID: userID, force: true) }
                 }
             }
         }

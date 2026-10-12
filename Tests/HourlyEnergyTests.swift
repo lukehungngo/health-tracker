@@ -57,6 +57,73 @@ final class HourlyEnergyTests: XCTestCase {
                                                     weights: [weight()]).totalKcal, 170, accuracy: 0.001)
     }
 
+    func testAIBackfillReplacesModeledHourAndProvidesActiveEnergy() {
+        let ai = EnergyBackfill(hour_at: date(1), active_kcal: 20, total_burn_kcal: 95)
+        let summary = HourlyEnergyCalculator.summary(for: date(0), now: date(3),
+                                                     calendar: calendar, hourly: [], sleep: [],
+                                                     weights: [weight()], backfills: [ai])
+        XCTAssertEqual(summary.totalKcal, 255, accuracy: 0.001)
+        XCTAssertEqual(summary.aiBackfillKcal, 95, accuracy: 0.001)
+        XCTAssertEqual(summary.estimatedKcal, 160, accuracy: 0.001)
+        XCTAssertEqual(summary.activeKcal ?? -1, 20, accuracy: 0.001)
+        XCTAssertEqual(summary.aiActiveKcal, 20, accuracy: 0.001)
+    }
+
+    func testRecordedHourWinsOverAIWithoutDoubleCounting() {
+        let row = HourlyEnergy(hour_at: date(1), basal_kcal: 60, active_kcal: 30,
+                               basal_samples: 1, active_samples: 1)
+        let ai = EnergyBackfill(hour_at: date(1), active_kcal: 100, total_burn_kcal: 300)
+        let summary = HourlyEnergyCalculator.summary(for: date(0), now: date(2),
+                                                     calendar: calendar, hourly: [row], sleep: [],
+                                                     weights: [weight()], backfills: [ai])
+        XCTAssertEqual(summary.totalKcal, 170, accuracy: 0.001)
+        XCTAssertEqual(summary.activeKcal ?? -1, 30, accuracy: 0.001)
+        XCTAssertEqual(summary.aiBackfillKcal, 0)
+        XCTAssertEqual(summary.aiActiveKcal, 0)
+    }
+
+    func testAIActiveOnlyFillsMissingActiveAlongsideRecordedBasal() {
+        let row = HourlyEnergy(hour_at: date(1), basal_kcal: 60, active_kcal: 0,
+                               basal_samples: 1, active_samples: 0)
+        let ai = EnergyBackfill(hour_at: date(1), active_kcal: 25, total_burn_kcal: nil)
+        let summary = HourlyEnergyCalculator.summary(for: date(0), now: date(2),
+                                                     calendar: calendar, hourly: [row], sleep: [],
+                                                     weights: [weight()], backfills: [ai])
+        XCTAssertEqual(summary.totalKcal, 165, accuracy: 0.001)
+        XCTAssertEqual(summary.activeKcal ?? -1, 25, accuracy: 0.001)
+        XCTAssertEqual(summary.aiBackfillKcal, 25, accuracy: 0.001)
+    }
+
+    func testCurrentHourAIBackfillIsProratedToElapsedTime() {
+        let ai = EnergyBackfill(hour_at: date(0), active_kcal: 40, total_burn_kcal: 100)
+        let summary = HourlyEnergyCalculator.summary(for: date(0), now: date(0, 30),
+                                                     calendar: calendar, hourly: [], sleep: [],
+                                                     weights: [weight()], backfills: [ai])
+        XCTAssertEqual(summary.totalKcal, 50, accuracy: 0.001)
+        XCTAssertEqual(summary.activeKcal ?? -1, 20, accuracy: 0.001)
+        XCTAssertEqual(summary.aiBackfillKcal, 50, accuracy: 0.001)
+    }
+
+    func testTotalOnlyAIBackfillWorksWithoutWeight() {
+        let ai = EnergyBackfill(hour_at: date(0), active_kcal: nil, total_burn_kcal: 90)
+        let summary = HourlyEnergyCalculator.summary(for: date(0), now: date(1),
+                                                     calendar: calendar, hourly: [], sleep: [],
+                                                     weights: [], backfills: [ai])
+        XCTAssertEqual(summary.totalKcal, 90, accuracy: 0.001)
+        XCTAssertNil(summary.activeKcal)
+        XCTAssertFalse(summary.isPartial)
+    }
+
+    func testActiveOnlyAIBackfillWithoutWeightKeepsTotalPartial() {
+        let ai = EnergyBackfill(hour_at: date(0), active_kcal: 25, total_burn_kcal: nil)
+        let summary = HourlyEnergyCalculator.summary(for: date(0), now: date(1),
+                                                     calendar: calendar, hourly: [], sleep: [],
+                                                     weights: [], backfills: [ai])
+        XCTAssertEqual(summary.activeKcal ?? -1, 25, accuracy: 0.001)
+        XCTAssertEqual(summary.totalKcal, 25, accuracy: 0.001)
+        XCTAssertTrue(summary.isPartial)
+    }
+
     func testEarliestAppWeightCanEstimateEarlierHistory() {
         let summary = HourlyEnergyCalculator.summary(for: date(0), now: date(1),
                                                      calendar: calendar, hourly: [], sleep: [],
