@@ -118,17 +118,22 @@ enum HourlyEnergyCalculator {
             let overlapping = hourly.filter {
                 $0.hour_at < finish && $0.hour_at.addingTimeInterval(3600) > cursor
             }
-            if !overlapping.isEmpty {
-                for row in overlapping {
-                    let effectiveEnd = min(row.hour_at.addingTimeInterval(3600), now)
-                    let seconds = min(finish, effectiveEnd)
-                        .timeIntervalSince(max(cursor, row.hour_at))
-                    let observedSeconds = effectiveEnd.timeIntervalSince(row.hour_at)
-                    if seconds > 0, observedSeconds > 0 {
-                        measured += (row.basal_kcal + row.active_kcal) * seconds / observedSeconds
-                    }
+            // Active-only cloud entries (including manual backfills) add energy;
+            // they do not establish basal coverage for this hour.
+            for row in overlapping {
+                let effectiveEnd = min(row.hour_at.addingTimeInterval(3600), now)
+                let seconds = min(finish, effectiveEnd)
+                    .timeIntervalSince(max(cursor, row.hour_at))
+                let observedSeconds = effectiveEnd.timeIntervalSince(row.hour_at)
+                if seconds > 0, observedSeconds > 0 {
+                    measured += (row.basal_kcal + row.active_kcal) * seconds / observedSeconds
                 }
-            } else if let weight = weights.first(where: { $0.measuredAt <= cursor })
+            }
+            if overlapping.contains(where: { $0.basal_samples > 0 }) {
+                cursor = finish
+                continue
+            }
+            if let weight = weights.first(where: { $0.measuredAt <= cursor })
                 ?? weights.last {
                 let sleepStages = sleep.filter {
                     ($0.isAsleep || $0.isAwake) && $0.start_at < finish && $0.end_at > cursor
