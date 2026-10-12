@@ -20,6 +20,55 @@ final class HourlyEnergyTests: XCTestCase {
                     kilograms: 80)
     }
 
+
+    func testActiveOnlyBackfillAddsToExistingFallbackDuringCurrentHour() {
+        let now = date(7, 55)
+        let before = HourlyEnergyCalculator.summary(for: date(0), now: now,
+                                                    calendar: calendar, hourly: [], sleep: [],
+                                                    weights: [weight()])
+        let row = HourlyEnergy(hour_at: date(7), basal_kcal: 0, active_kcal: 150,
+                               basal_samples: 0, active_samples: 1)
+        let after = HourlyEnergyCalculator.summary(for: date(0), now: now,
+                                                   calendar: calendar, hourly: [row], sleep: [],
+                                                   weights: [weight()])
+        XCTAssertEqual(after.measuredKcal, 150, accuracy: 0.001)
+        XCTAssertEqual(after.estimatedKcal, before.estimatedKcal, accuracy: 0.001)
+        XCTAssertEqual(after.totalKcal - before.totalKcal, 150, accuracy: 0.001)
+        XCTAssertFalse(after.isPartial)
+        let refreshed = HourlyEnergyCalculator.summary(for: date(0), now: now,
+                                                       calendar: calendar, hourly: [row], sleep: [],
+                                                       weights: [weight()])
+        XCTAssertEqual(refreshed.totalKcal, after.totalKcal, accuracy: 0.001)
+    }
+
+    func testActiveOnlyWithoutWeightStillReportsMissingBaseline() {
+        let row = HourlyEnergy(hour_at: date(0), basal_kcal: 0, active_kcal: 150,
+                               basal_samples: 0, active_samples: 1)
+        let summary = HourlyEnergyCalculator.summary(for: date(0), now: date(1),
+                                                     calendar: calendar, hourly: [row], sleep: [],
+                                                     weights: [])
+        XCTAssertEqual(summary.measuredKcal, 150, accuracy: 0.001)
+        XCTAssertEqual(summary.estimatedKcal, 0, accuracy: 0.001)
+        XCTAssertEqual(summary.uncoveredHours, 1, accuracy: 0.001)
+        XCTAssertTrue(summary.isPartial)
+    }
+
+    func testBasalArrivalReplacesFallbackButRetainsActiveBackfill() {
+        let activeOnly = HourlyEnergy(hour_at: date(0), basal_kcal: 0, active_kcal: 150,
+                                      basal_samples: 0, active_samples: 1)
+        let withBasal = HourlyEnergy(hour_at: date(0), basal_kcal: 70, active_kcal: 150,
+                                     basal_samples: 1, active_samples: 1)
+        let before = HourlyEnergyCalculator.summary(for: date(0), now: date(1),
+                                                    calendar: calendar, hourly: [activeOnly],
+                                                    sleep: [], weights: [weight()])
+        let after = HourlyEnergyCalculator.summary(for: date(0), now: date(1),
+                                                   calendar: calendar, hourly: [withBasal],
+                                                   sleep: [], weights: [weight()])
+        XCTAssertEqual(before.totalKcal, 230, accuracy: 0.001)
+        XCTAssertEqual(after.totalKcal, 220, accuracy: 0.001)
+        XCTAssertEqual(after.estimatedKcal, 0, accuracy: 0.001)
+    }
+
     func testSleepWindowAndCurrentPartialHourUseOnlyElapsedTime() {
         let row = HourlyEnergy(hour_at: date(1), basal_kcal: 60, active_kcal: 20,
                                basal_samples: 1, active_samples: 1)
